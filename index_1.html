@@ -1023,8 +1023,6 @@ function printNow(){
     <span class="btn-today" id="dateLabel" style="cursor:default;letter-spacing:.02em" title="Date is locked to today">📅 <span id="dateLabelTxt">Sun, 30 Aug 2026</span></span>
   </div>
   <div class="savedot" id="saveDot" title="Saved to this device’s durable storage. The browser’s quick cache is full — usually too many photos. Your data is safe.">Saved</div>
-  <button class="topbtn" id="shareAppBtn" title="Download one HTML file with ALL current data &amp; users built in — mail this to share everything" style="background:var(--good);border-color:var(--good);color:#fff">📤 Share App (all data)</button>
-  <button class="topbtn" id="topImportBtn" title="Import backup — your password required">⬆ Import Data</button>
   <input type="file" id="importInput" accept=".json,application/json" style="display:none">
   <div class="whoami" id="whoami"></div>
   <div class="tabs" style="display:none">
@@ -3061,8 +3059,8 @@ function printNow(){
     <div class="card-h"><h2>Data Backup</h2></div>
     <div class="card-b">
       <button class="ghost" id="exportBtn">⬇ Export backup (JSON)</button>
-      <button class="primary" id="exportAppBtn" style="margin-left: 8px;">📤 Save shareable App (with users &amp; data)</button>
-      <p class="danger-note">All data is saved automatically in this browser on this computer. <b>Each project has its own backup file</b> — the file is named after the project and carries everything that project owns: every day, the BOQ and Work Plan, work orders and bills, the store, procurement, site documents, drawings, RFIs, COS letters, site instructions, cylinder tests, users and photographs. Export one regularly (e.g. weekly) to keep your records safe or to move them to another computer. To restore, use the <b>⬆ Import Data</b> button at the top (your password required) — a backup can only be loaded back into the project it was taken from, so another project’s file can never overwrite this one by mistake.</p>
+      <button class="primary" id="exportAppBtn" style="margin-left: 8px;">📤 Save shareable App (with users &amp; data)</button><button class="ghost" id="bkImportBtn" style="margin-left:8px" title="Import backup — your password required">⬆ Import Data</button>
+      <p class="danger-note">All data is saved automatically in this browser on this computer. <b>Each project has its own backup file</b> — the file is named after the project and carries everything that project owns: every day, the BOQ and Work Plan, work orders and bills, the store, procurement, site documents, drawings, RFIs, COS letters, site instructions, cylinder tests, users and photographs. Export one regularly (e.g. weekly) to keep your records safe or to move them to another computer. To restore, use the <b>⬆ Import Data</b> button above (your password required) — a backup can only be loaded back into the project it was taken from, so another project’s file can never overwrite this one by mistake.</p>
       <p class="danger-note" style="margin-top:6px"><b>Sharing with another person?</b> Use <b>📤 Save shareable App</b> — it creates an HTML file with all current users, BOQ and records built in, so when they open it nothing is missing. (A plain copy of this file opens empty on their computer, because data lives in the browser, not in the file.)</p>
       <p class="danger-note" style="margin-top:14px;border-top:1px solid var(--border);padding-top:10px;text-align:center;color:var(--navy2);font-weight:600">This software is developed by Omer Mehmood</p>
     </div>
@@ -15901,7 +15899,7 @@ function renderConcHistory(){
 }
 
 /* ================= daily pics ================= */
-const MAX_PHOTOS=6;
+const MAX_PHOTOS=10;
 $('photoInput').addEventListener('change',async e=>{
   const d=day(curDate);
   const files=[...e.target.files].slice(0,MAX_PHOTOS-d.photos.length);
@@ -18712,7 +18710,7 @@ async function exportShareableApp(){
 }
 $('exportAppBtn').onclick=exportShareableApp;
 if($('shareAppBtn'))$('shareAppBtn').onclick=exportShareableApp;
-$('topImportBtn').onclick=async()=>{if(!await verifyMyPass('Enter your password to import a backup (replaces ALL data):'))return;$('importInput').click()};
+var _doImportBackup=async()=>{if(!await verifyMyPass('Enter your password to import a backup (replaces ALL data):'))return;$('importInput').click()};if($('topImportBtn'))$('topImportBtn').onclick=_doImportBackup;if($('bkImportBtn'))$('bkImportBtn').onclick=_doImportBackup;
 $('importInput').addEventListener('change',function(e){
   var f=e.target.files[0]; e.target.value=''; if(!f)return;
   var r=new FileReader();
@@ -23448,6 +23446,8 @@ function mrBackupHTML(){
     '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">'+
       '<button class="ghost" id="mrAllJson" style="padding:8px 16px;font-size:.84rem;font-weight:700">⬇ All projects (one JSON)</button>'+
       '<button class="primary" id="mrAppFull" style="padding:8px 18px;font-size:.86rem;font-weight:800;background:var(--good);border-color:var(--good)">⬇ App with full data (HTML)</button>'+
+      '<button class="ghost" id="mrImportBtn" style="padding:8px 16px;font-size:.84rem;font-weight:700;border-color:var(--navy);color:var(--navy)">⬆ Import backup (JSON)</button>'+
+      '<input type="file" id="mrImportInput" accept=".json,application/json" style="display:none">'+
     '</div>'+
     '<p style="font-size:.76rem;color:var(--muted);margin-top:12px;line-height:1.6">'+
       '<b>⬇ JSON</b> saves one project — every day, the BOQ and Work Plan, work orders and bills, the store, '+
@@ -23455,7 +23455,10 @@ function mrBackupHTML(){
       'It can only be imported back into that same project.<br>'+
       '<b>⬇ All projects (one JSON)</b> puts every project into a single file, for safe keeping.<br>'+
       '<b>⬇ App with full data (HTML)</b> saves the software itself with <b>every</b> project\'s data built in. '+
-      'Send that one file to anyone — they open it and everything is already there, no import needed.</p>';
+      'Send that one file to anyone — they open it and everything is already there, no import needed.<br>'+
+      '<b>⬆ Import backup (JSON)</b> loads a file back in. It takes either kind — one project\'s file, '+
+      'or the all-projects file — and works out for itself which project each part belongs to. '+
+      'Whatever those projects hold now is replaced, so the app reloads once it is done.</p>';
 }
 
 async function openMasterSettings(){
@@ -23518,11 +23521,130 @@ function mrUsersHTML(d){
     '<div style="margin-top:12px"><button class="primary" id="mrAddUser" style="padding:6px 16px;font-size:.82rem">➕ Add User</button></div>'+
     '<p style="font-size:.74rem;color:var(--muted);margin-top:10px">Master users are pushed into every project they are given access to — with exactly the sheets ticked for that project.</p>';
 }
+
+/* ================= Master Settings → Backup : IMPORT =====================
+   Ek hi button dono files leta hai — ek project ki JSON, ya sab projects wali
+   JSON. Har hissa khud pehchan kar apne project me chala jata hai, phir app
+   dobara load ho jati hai taake har project apna data saaf tareeqe se parhe. */
+function mrFindProject(p){
+  if(!p)return null;
+  var list=[]; try{ list=allProjects(); }catch(e){}
+  for(var i=0;i<list.length;i++){
+    var x=list[i];
+    if(x&&(x.id===p.id||(p.lsKey&&x.lsKey&&x.lsKey===p.lsKey)))return x;
+  }
+  return null;
+}
+function mrPutLS(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); return true; }catch(e){ return false; } }
+/* ek project ka state uske apne khaano me likho, itne oonche _ver ke saath ke
+   koi purana auto-save ise wapas na palat sake */
+function mrWriteProjectState(pr,app,mods){
+  if(!pr||!app||typeof app!=='object')return false;
+  try{
+    var st=JSON.parse(JSON.stringify(app));
+    var cur=0;
+    try{ var l=JSON.parse(localStorage.getItem(pr.lsKey)||'{}'); cur=Math.max(cur,+l._ver||0); }catch(e){}
+    try{ var c=MR_STATE_CACHE[pr.id]; if(c)cur=Math.max(cur,+c._ver||0); }catch(e){}
+    st._ver=cur+1000;
+    var str=JSON.stringify(st);
+    try{ localStorage.setItem(pr.lsKey,str); }catch(e){}
+    try{ idbStateSetIn(pr.idb,str); }catch(e){}
+    try{ MR_STATE_CACHE[pr.id]=st; }catch(e){}
+    /* jo project abhi khula hai uski memory bhi badal do, warna beech me hone
+       wala auto-save purana data wapas likh dega */
+    try{
+      if(typeof PROJ!=='undefined'&&PROJ&&PROJ.id===pr.id&&typeof S!=='undefined'){
+        S=st; if(typeof bkRestoreModules==='function')bkRestoreModules(mods||{});
+      }
+    }catch(e){}
+    if(mods&&typeof mods==='object'){
+      if(Array.isArray(mods.letters)) mrPutLS('cos_letters_v1_'+pr.id,mods.letters);
+      if(mods.cyl&&typeof mods.cyl==='object') mrPutLS('cyl_test_v1_'+pr.id,mods.cyl);
+      if(Array.isArray(mods.sir)) mrPutLS('sir_records_v1_'+pr.id,mods.sir);
+      try{ if(mods.lastDate)localStorage.setItem('eo_lastdate_'+pr.id,mods.lastDate); }catch(e){}
+    }
+    return true;
+  }catch(e){ return false; }
+}
+/* Bills, Item Master, Piles aur Designations sab projects ke liye ek hi hain */
+function mrRestoreShared(mods){
+  if(!mods||typeof mods!=='object')return;
+  try{ if(mods.billsData!=null) mrPutLS('bills_data_v1',mods.billsData); }catch(e){}
+  try{ if(mods.masterData!=null) mrPutLS('master_data_v1',mods.masterData); }catch(e){}
+  try{ if(mods.pilesDash!=null) mrPutLS('piles_dashboard_v1',mods.pilesDash); }catch(e){}
+  try{
+    if(Array.isArray(mods.designations)&&mods.designations.length){
+      var cur=[]; try{ cur=JSON.parse(localStorage.getItem(DESIG_KEY)||'[]')||[]; }catch(e){}
+      mods.designations.forEach(function(d){ if(d&&cur.indexOf(d)<0)cur.push(d); });
+      mrPutLS(DESIG_KEY,cur);
+    }
+  }catch(e){}
+}
+function mrPackSummary(list){
+  return list.map(function(e){
+    var c=e.counts||{}, nm=(e.project&&(e.project.name||e.project.id))||'unknown project';
+    return '  • '+nm+' — '+(c.days||0)+' day(s), '+(c.boq||0)+' BOQ, '+(c.photos||0)+' photo(s)';
+  }).join('\n');
+}
+async function mrImportFile(f){
+  var text=await new Promise(function(res,rej){
+    var r=new FileReader(); r.onload=function(){res(r.result)}; r.onerror=function(){rej()}; r.readAsText(f);
+  }).catch(function(){ return null; });
+  if(text==null){ toast('That file could not be read.'); return; }
+  var d; try{ d=JSON.parse(text); }catch(e){ toast('That file is not a valid backup.'); return; }
+
+  /* ---- sab projects wali file ---- */
+  if(d&&d._backup==='siteapp-all-projects'&&Array.isArray(d.projects)){
+    var entries=d.projects.filter(function(e){ return e&&e.app&&typeof e.app==='object'; });
+    if(!entries.length){ toast('That all-projects file has no project data in it.'); return; }
+    var ok=await uiConfirm('Restore every project from this file?\n\n'+mrPackSummary(entries)+
+      (d.savedAtText?('\n\nTaken '+d.savedAtText+(d.savedBy?(' by '+d.savedBy):'')):'')+
+      '\n\nWhatever these projects hold now will be replaced. The app will reload when it is done.','Restore all');
+    if(!ok)return;
+    /* pehle master registry, taake file ke naye projects wajood me aa jayein */
+    try{ if(d.master&&typeof d.master==='object'){ localStorage.setItem(MR_KEY,JSON.stringify(d.master)); PROJECTS=allProjects(); } }catch(e){}
+    var done=0, missed=[];
+    entries.forEach(function(e){
+      var pr=mrFindProject(e.project);
+      if(!pr){ missed.push((e.project&&(e.project.name||e.project.id))||'unknown'); return; }
+      if(mrWriteProjectState(pr,e.app,e.modules))done++;
+      mrRestoreShared(e.modules);
+    });
+    toast('✅ Restored '+done+' project(s)'+(missed.length?(' · skipped '+missed.join(', ')):'')+' — reloading…');
+    setTimeout(function(){ try{ location.reload(); }catch(e){} },1200);
+    return;
+  }
+
+  /* ---- ek project wali file ---- */
+  var env=(typeof bkReadEnvelope==='function')?bkReadEnvelope(d):null;
+  if(!env){ toast('That file is not a SiteApp backup.'); return; }
+  var pr=mrFindProject(env.project);
+  if(!pr&&env.project){
+    await uiAlert('⛔ This backup belongs to “'+(env.project.name||env.project.id)+'”, which is not on this '+
+      'computer any more.\n\nAdd that project first (Master Settings → Projects), then import the file again.');
+    return;
+  }
+  if(!pr){ toast('This older backup does not say which project it belongs to — open the project and use Import there.'); return; }
+  var c=env.counts||{};
+  var ok2=await uiConfirm('Restore “'+pr.name+'” from this backup?\n\n'+
+    (c.days||0)+' day(s) · '+(c.boq||0)+' BOQ items · '+(c.photos||0)+' photo(s)'+
+    (env.savedAtText?('\n\nTaken '+env.savedAtText+(env.savedBy?(' by '+env.savedBy):'')):'')+
+    '\n\nEverything currently in '+pr.name+' will be replaced. The app will reload when it is done.','Restore');
+  if(!ok2)return;
+  if(!mrWriteProjectState(pr,env.app,env.modules)){ toast('⚠ Could not write that project’s data.'); return; }
+  mrRestoreShared(env.modules);
+  toast('✅ '+pr.name+' restored — reloading…');
+  setTimeout(function(){ try{ location.reload(); }catch(e){} },1200);
+}
+
 function mrWire(ov){
   if(!ov)return;
   ov.querySelectorAll('.mr-bk1').forEach(function(b){ b.onclick=function(){ mrBackupOne(b.dataset.id); }; });
   var aj=ov.querySelector('#mrAllJson'); if(aj)aj.onclick=function(){ mrBackupAllJson(); };
   var af=ov.querySelector('#mrAppFull'); if(af)af.onclick=function(){ mrExportAppFull(); };
+  var im=ov.querySelector('#mrImportBtn'); var imf=ov.querySelector('#mrImportInput');
+  if(im&&imf){ im.onclick=function(){ imf.click(); };
+    imf.onchange=function(e){ var f=e.target.files[0]; e.target.value=''; if(f)mrImportFile(f); }; }
   var ap=ov.querySelector('#mrAddProj'); if(ap)ap.onclick=function(){ ov.remove(); openAddProject(); };
   ov.querySelectorAll('.mr-delproj').forEach(function(b){ b.onclick=async function(){
     if(typeof uiConfirm==='function' && !(await uiConfirm('Remove this project from the list? Its saved data stays in the browser.','Remove')))return;
