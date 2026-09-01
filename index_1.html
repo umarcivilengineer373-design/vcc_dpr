@@ -17472,7 +17472,7 @@ window.addEventListener('afterprint',function(){
    concrete entry (c.inv / c.invDate / c.bstat) — so they travel automatically
    with the backup, the edit form and the cloud day-sync. */
 var supF={ven:'',st:'',q:'',from:'',to:''};
-var supSel={}; var supGroups={};                                    /* "date|idx" -> selected */
+var supSel={}; var supGroups={}; var supLockedG={};                                    /* "date|idx" -> selected */
 var SUP_STATUSES=['Unbilled','Invoiced'];
 var SUP_ST_COLOR={Unbilled:'#c0392b',Invoiced:'#0e7bb8',Pending:'#c0392b',Forwarded:'#b8860b',Paid:'#1f8f4e'};
 /* status is AUTOMATIC: DR # and PR # both present -> Invoiced, otherwise Unbilled */
@@ -17520,7 +17520,7 @@ function renderSupBill(){
      distributed in proportion to each slip's own quantity. ---- */
   var body='', tQ=0, stQ={Invoiced:0,Unbilled:0}, stN={Invoiced:0,Unbilled:0};
   var byVen={};
-  supGroups={};
+  supGroups={}; supLockedG={};
   var gmap={}, gorder=[];
   flt.forEach(function(r){
     var c=r.c, k=r.d+'|'+r.i, st=supStatusOf(c), qy=+c.qty||0;
@@ -17567,8 +17567,13 @@ function renderSupBill(){
     });
     var st=allInv?'Invoiced':'Unbilled';
     var lk=allLk?1:0, dis=lk?' disabled':'', lks=lk?';background:#eef1f5;color:#5b6b7b':'';
-    body+='<tr'+(sel?' style="background:#eef7f0"':'')+'>'+
-      '<td style="text-align:center"><input type="checkbox" class="supChk" data-g="'+esc(gk)+'"'+(sel?' checked':'')+'></td>'+
+    /* Invoice ban jane par slip lock ho jati hai (c.lk=1). Ab wo tick bhi nahi
+       ho sakti — warna ek hi slip dobara doosri invoice me chali jati thi.
+       Kholne ke liye row ke 🔓 par edit password dena hoga. */
+    if(lk)supLockedG[gk]=1;
+    body+='<tr'+(sel?' style="background:#eef7f0"':(lk?' style="background:#fafbfc"':''))+'>'+
+      '<td style="text-align:center"><input type="checkbox" class="supChk" data-g="'+esc(gk)+'"'+(sel?' checked':'')+dis+
+        (lk?' title="Invoice ban chuki hai — kholne ke liye 🔓 dabayein"':'')+'></td>'+
       '<td style="white-space:nowrap">'+fmtShort(g.d)+'</td>'+
       '<td style="font-weight:600;color:var(--navy2)">'+esca(g.ven)+'</td>'+
       '<td style="max-width:190px"><div>'+slipsCell+' <span style="font-size:.66rem;color:var(--muted)">('+rows.length+')</span></div>'+(picsCell?('<div style="margin-top:2px">'+picsCell+'</div>'):'')+'</td>'+
@@ -17584,7 +17589,7 @@ function renderSupBill(){
       '<td><input type="number" step="any" class="supPrQ" data-g="'+esc(gk)+'" value="'+(anyPq?esca(Math.round(pq*100)/100):'')+'" placeholder="—"'+dis+' style="width:70px;font-size:.78rem;padding:3px 6px;text-align:right;font-weight:600'+lks+'"></td>'+
       '<td><input type="text" class="supInv" data-g="'+esc(gk)+'" value="'+esca(inv)+'" placeholder="—"'+dis+' style="width:100px;font-size:.78rem;padding:3px 6px'+lks+'"></td>'+
       '<td><input type="date" class="supInvD" data-g="'+esc(gk)+'" value="'+esca(invD)+'"'+dis+' style="font-size:.78rem;padding:3px 6px;width:128px'+lks+'"></td>'+
-      '<td style="white-space:nowrap"><span style="font-weight:800;font-size:.74rem;color:'+SUP_ST_COLOR[st]+'">'+st+'</span>'+(lk?' <span title="Locked — use 🔓 Unlock at the top to edit" style="font-size:.8rem">🔒</span>':'')+'</td>'+
+      '<td style="white-space:nowrap"><span style="font-weight:800;font-size:.74rem;color:'+SUP_ST_COLOR[st]+'">'+st+'</span>'+(lk?' <span style="font-size:.8rem" title="Locked">🔒</span> <button type="button" class="supUnlkOne" data-g="'+esc(gk)+'" title="Kholne ke liye edit password dein" style="border:1px solid #d8c07a;background:#fdf6e3;color:#8a6d1a;border-radius:5px;padding:1px 6px;font-size:.72rem;font-weight:700;cursor:pointer">🔓</button>':'')+'</td>'+
       '<td style="font-size:.64rem;color:var(--muted);line-height:1.35">'+
         (stamps.drAt?('DR: '+esca(stamps.drBy)+' · '+wfFmtTs(stamps.drAt)+'<br>'):'')+
         (stamps.prAt?('PR: '+esca(stamps.prBy)+' · '+wfFmtTs(stamps.prAt)+'<br>'):'')+
@@ -17622,6 +17627,21 @@ function renderSupBill(){
     img.onclick=function(){ $('slipImg').src=img.dataset.src; slipTarget=null; $('slipModal').classList.add('show'); };
   });
   /* ---- row-level events (rebuilt on every render) ---- */
+  $('supTable').querySelectorAll('.supUnlkOne').forEach(function(btn){
+    btn.onclick=async function(){
+      var keys=supGroups[btn.dataset.g]||[];
+      if(!keys.length)return;
+      if(!(await requireEditPass('Yeh slip invoice ho chuki hai. Kholne ke liye edit password dein:')))return;
+      var who=(currentUser?currentUser.name:''), now=Date.now(), touched={};
+      keys.forEach(function(k){
+        var c=supEntry(k); if(!c)return;
+        c.lk=0; c.unlkBy=who; c.unlkAt=now;      /* genNo / genInv qayam — invoice ka record nahi todte */
+        touched[String(k).split('|')[0]]=1;
+      });
+      save(true); supCloudPush(touched); renderSupBill();
+      toast('🔓 '+keys.length+' slip(s) khul gayin — ab edit aur select ho sakti hain.');
+    };
+  });
   $('supTable').querySelectorAll('.supChk').forEach(function(cb){
     cb.addEventListener('change',function(){
       var keys=supGroups[cb.dataset.g]||[];
@@ -17931,7 +17951,11 @@ if($('supReset'))$('supReset').onclick=async function(){
 if($('supChkAll'))$('supChkAll').addEventListener('change',function(){
   var on=$('supChkAll').checked;
   supSel={};
-  if(on)Object.keys(supGroups).forEach(function(gk){(supGroups[gk]||[]).forEach(function(k){supSel[k]=1})});
+  /* locked (invoice ho chuki) slips select-all se bhi nahi uthengi */
+  if(on)Object.keys(supGroups).forEach(function(gk){
+    if(supLockedG[gk])return;
+    (supGroups[gk]||[]).forEach(function(k){supSel[k]=1});
+  });
   renderSupBill();
 });
 if($('supVen'))$('supVen').addEventListener('change',function(e){supF.ven=e.target.value;renderSupBill()});
@@ -24891,9 +24915,20 @@ function selectProject(pid){
   flushSave();                       /* anything still waiting belongs to the OLD project */
   /* Only stamp when we are really leaving a project. Re-picking the project we are
      already on would otherwise write the boot date over the remembered one. */
-  if(PROJ && PROJ.id!==pr.id){ try{ localStorage.setItem('eo_lastdate_'+PROJ.id, curDate); }catch(e){} }
+  var _switching=!!(PROJ && PROJ.id!==pr.id);
+  if(_switching){ try{ localStorage.setItem('eo_lastdate_'+PROJ.id, curDate); }catch(e){} }
   PROJ=pr; LS_KEY=pr.lsKey;
   try{ localStorage.setItem(PROJ_KEY,pr.id); }catch(e){}
+  /* ---- Project badalne par app POORI dobara load hoti hai ----------------
+     Pehle sirf PROJ aur LS_KEY badal diye jate the aur naya state async
+     aata tha. Us darmiyani lamhe me S abhi PICHLE project ka hota tha jabki
+     cloudTable() NAYE project ka naam de chuka hota tha — is liye purane
+     project ke din naye project ki table me chale jate the aur dono ka data
+     mil jata tha (isi liye kabhi boqPruneForeign likhna para tha, aur isi
+     liye piles ka frame bhi purana khara reh jata tha). Reload karne se S,
+     PROJ, saare module aur frame — sab ek hi project par aa jate hain. */
+  if(_switching){ try{ flushSave(); }catch(e){}
+    setTimeout(function(){ try{ location.reload(); }catch(e){} },150); return; }
   applyBrand();
   currentUser=null;
   document.getElementById('lgPick').style.display='none';
@@ -28549,7 +28584,10 @@ async function cloudPullAll(silent){
   cloudStatus('sync');
   cloudSnapBackup();                 /* pehle is device ka data mehfooz */
   try{
+    var _proj0=(typeof PROJ!=='undefined'&&PROJ&&PROJ.id)||'';
     var r=await Promise.all([supaPull('settings'),supaPull('boq'),supaPull('day'),supaPull('target')]);
+    /* jawab aate aate project badal gaya? to yeh data ab kisi aur ka hai — chhoro */
+    if((((typeof PROJ!=='undefined'&&PROJ&&PROJ.id)||''))!==_proj0){ cloudStatus('ok'); return; }
     var meta=r[0],boq=r[1],days=r[2],tgts=r[3];
 
     /* safety: the cloud is empty but there is data locally -> do nothing.
