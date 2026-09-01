@@ -7495,7 +7495,14 @@ function boqOwnerMap(){
 }
 function boqPruneForeign(s){
   try{
-    var here=(typeof PROJ!=='undefined'&&PROJ&&PROJ.id)||'';
+    /* ---- YEH ASAL BUG THA ----------------------------------------------
+       Yahan hamesha KHULE project ka id liya jata tha. Dashboard jab doosre
+       project ka state normalise karta hai to uske saare BOQ items "doosre
+       project ke" samajh kar park ho jate the — S.boq khali, aur us project
+       ka dashboard 0 aur "No BOQ groups" dikhata tha. Isi liye jo project
+       khula ho wo theek aur doosra khali: kabhi ek ghayab, kabhi doosra.
+       Ab chhantai us project ke hisab se hoti hai JISKA state hai. */
+    var here=MR_NORM_PID||((typeof PROJ!=='undefined'&&PROJ&&PROJ.id)||'');
     if(!here||!Array.isArray(s.boq))return s;
     var map=boqOwnerMap(), keep=[], other=[];
     s.boq.forEach(function(b){
@@ -23996,11 +24003,15 @@ function mrSyncUsers(st){
   return st;
 }
 /* ---------- targets completion, computed from any project's saved state ---------- */
-function mrWithState(st,fn){
-  var _S=S, _cur=(typeof curDate!=='undefined')?curDate:null, out=null;
-  try{ S=normState(JSON.parse(JSON.stringify(st||{}))); out=fn(); }
+var MR_NORM_PID=null;   /* abhi kis project ka state normalise ho raha hai */
+function mrWithState(st,fn,pid){
+  var _S=S, _cur=(typeof curDate!=='undefined')?curDate:null, _p=MR_NORM_PID, out=null;
+  try{
+    if(pid!==undefined) MR_NORM_PID=pid||null;   /* nested calls purana pid rakhte hain */
+    S=normState(JSON.parse(JSON.stringify(st||{}))); out=fn();
+  }
   catch(e){ out=null; }
-  finally{ S=_S; if(_cur!=null)try{curDate=_cur;}catch(e){} }
+  finally{ S=_S; MR_NORM_PID=_p; if(_cur!=null)try{curDate=_cur;}catch(e){} }
   return out;
 }
 function mrTargetStats(st,asOf){
@@ -24104,28 +24115,37 @@ function mrLoadAllStates(){
     });
   });
 }
+var MR_STATE_SRC={};   /* har project ka data aakhir aaya kahan se — dashboard par dikhta hai */
 function mrProjectState(pr){
-  var ls=null, idb=MR_STATE_CACHE[pr.id]||null;
-  try{ var raw=localStorage.getItem(pr.lsKey); if(raw)ls=JSON.parse(raw); }catch(e){}
-  var pick=null;
-  if(ls&&idb){
-    pick=(((idb._ver||0)>=(ls._ver||0))?idb:ls);
-    /* localStorage bhar jane par (bohot si photos) us me adhuri copy reh jati
-       hai jiska _ver phir bhi bara ho sakta hai. Agar chuni hui copy bilkul
-       khali ho aur doosri me data mojood ho, to doosri lo — khali copy kabhi
-       bhari copy par tarjeeh nahi payegi. */
-    var _wt=function(o){ try{ return (((o||{}).boq||[]).length)+Object.keys(((o||{}).days)||{}).length; }catch(e){ return 0; } };
-    var other=(pick===idb)?ls:idb;
-    if(_wt(pick)===0 && _wt(other)>0) pick=other;
-  }
-  else pick=idb||ls;
-  if(pick)return pick;
+  if(!pr)return null;
+  var _wt=function(o){ try{ return (((o||{}).boq||[]).length)+Object.keys(((o||{}).days)||{}).length; }catch(e){ return 0; } };
+  /* Jo project ABHI khula hai uska sach hamesha S me hai. */
   try{
-    if(window.__APP_SEEDS__&&window.__APP_SEEDS__[pr.id])return window.__APP_SEEDS__[pr.id];
-    if(pr.id==='vertical'&&window.__APP_SEED__)return window.__APP_SEED__;
-    if(pr.id==='elevation'&&window.__APP_SEED_EL__)return window.__APP_SEED_EL__;
+    if(typeof PROJ!=='undefined'&&PROJ&&PROJ.id===pr.id&&typeof S!=='undefined'&&S){
+      MR_STATE_SRC[pr.id]='live'; return S;
+    }
   }catch(e){}
-  return null;
+  /* Baqi projects ke liye teenon jagah dekho: IndexedDB, localStorage, aur file
+     me baked seed. Pehle sirf _ver dekha jata tha aur `if(pick)return pick;` ki
+     wajah se ek KHALI magar maujood copy seed ko rok deti thi — isi liye jo
+     project khula na ho wo dashboard par bilkul khali dikhta tha. Ab qanoon
+     seedha hai: sabse ZYADA data wali copy jeetegi; barabar hon to naya _ver. */
+  var cand=[];
+  try{ var idb=MR_STATE_CACHE[pr.id]; if(idb)cand.push({k:'database',v:idb}); }catch(e){}
+  try{ var raw=localStorage.getItem(pr.lsKey); if(raw)cand.push({k:'browser',v:JSON.parse(raw)}); }catch(e){}
+  try{
+    var seed=(window.__APP_SEEDS__||{})[pr.id]
+          || ((pr.id==='vertical')?window.__APP_SEED__:null)
+          || ((pr.id==='elevation')?window.__APP_SEED_EL__:null);
+    if(seed)cand.push({k:'file',v:seed});
+  }catch(e){}
+  if(!cand.length){ MR_STATE_SRC[pr.id]='none'; return null; }
+  cand.sort(function(a,b){
+    var d=_wt(b.v)-_wt(a.v); if(d)return d;
+    return (((b.v||{})._ver)||0)-(((a.v||{})._ver)||0);
+  });
+  MR_STATE_SRC[pr.id]=cand[0].k+' ('+_wt(cand[0].v)+')';
+  return cand[0].v;
 }
 function mrProjSummary(pr){
   var st=mrProjectState(pr)||{};
@@ -24186,7 +24206,7 @@ function mrProjFull(pr){
   try{
     if(pr && pr.id===((typeof PROJ!=='undefined'&&PROJ&&PROJ.id)||'')){
       try{ if(typeof flushSave==='function')flushSave(); }catch(e){}
-      st=S;
+      st=S; try{ MR_STATE_SRC[pr.id]='live'; }catch(e){}
     }
   }catch(e){}
   if(!st) st=mrProjectState(pr)||{};
@@ -24281,7 +24301,7 @@ function mrProjFull(pr){
             pay:{tot:billTot,paid:paid,bal:Math.max(0,billTot-paid),today:todayAmt,prev:prevAmt,pct:mdPct(paid,billTot),bills:bills.length,
                  prevUnpaid:prevUnpaid,recvToday:recvToday,paidToday:paidToday},
             piles:piles,curve:curve,tg:tg};
-  });
+  },pr&&pr.id);
   return Object.assign({pr:pr,proc:procS},out||{TPV:0,TEV:0,remain:0,spi:null,pct:0,dn:0,ip:0,ns:0,groups:[],mpC:0,mpV:0,mp:0,pay:{tot:0,paid:0,bal:0,today:0,prev:0,pct:0,bills:0,prevUnpaid:0,recvToday:0,paidToday:0},piles:null,curve:[],tg:null});
 }
 /* ---------- procurement snapshot for the executive dashboard ---------- */
@@ -24493,6 +24513,7 @@ function mdBuild(all){
     return (label?('<div style="display:flex;align-items:center;gap:8px;margin:2px 0 6px;flex-wrap:wrap">'+
         '<span style="width:5px;height:16px;border-radius:3px;background:#1d8bd1"></span>'+
         '<span style="font-weight:800;color:#12283f;font-size:1.25rem;letter-spacing:.02em">'+esc(label)+'</span>'+
+      (pid?('<span title="Yeh project ka data kahan se parha gaya" style="font-size:.86rem;color:#8494a4;font-weight:600">· '+esc(String(MR_STATE_SRC[pid]||'—'))+'</span>'):'')+
         (pid?('<button data-mdtog="'+esc(pid)+'" title="'+(hid?'Show':'Hide')+' this project" style="background:#fff;border:1px solid #d7e0e9;border-radius:7px;padding:1px 9px;font-size:1.03rem;font-weight:700;color:#5b6b7b;cursor:pointer">'+(hid?'▸ show':'▾ hide')+'</button>'):'')+
         (chips||'')+
       '</div>'):'')+
