@@ -20440,9 +20440,15 @@ function renderPiles(){
   pileState();
   const hd=document.querySelector('#tab-piles .card-h h2'); if(hd)hd.textContent='Piles Progress — '+pileOnlyName();
   const hint=document.querySelector('#tab-piles .card-h .hint'); if(hint)hint.textContent='shoring piles · daily vs plan · SPI & forecast';
-  if(f.dataset.loaded==='1')return;          /* already running — don't wipe the user's view */
+  /* Project badalne par app dobara load nahi hoti — sirf PROJ badal jata hai. Pehle
+     yahan sirf 'loaded' dekha jata tha, is liye V-Grand ka bana hua frame Elevation
+     me bhi wahi ka wahi khara rehta tha aur doosre project ka data dikhata tha.
+     Ab yaad rakhte hain ke frame kis project ka bana tha. */
+  var _pid=(typeof PROJ!=='undefined'&&PROJ&&PROJ.id)||'';
+  if(f.dataset.loaded==='1'&&f.dataset.pid===_pid)return;   /* wahi project — view mat ujaaro */
   f.srcdoc=pileFrameHTML();
   f.dataset.loaded='1';
+  f.dataset.pid=_pid;
 }
 /* the embedded dashboard saves through our storage shim — keep it in the project data */
 window.addEventListener('message',function(ev){
@@ -27907,6 +27913,11 @@ async function cloudSaveDay(dateStr){
    database and the next pull put the old list straight back. */
 async function cloudSyncBoq(){
   if(!cloudOn()) return false;
+  /* SAFETY: agar is browser me BOQ khali hai to database ka BOQ HARGIZ na chhero.
+     Pehle push to khali hone par ruk jata tha, magar delete nahi rukta tha — yani
+     ek khali screen poore project ka BOQ database se uda deti thi. Khali BOQ kabhi
+     is baat ka saboot nahi ke items waqai hata diye gaye hain. */
+  if(!((S.boq||[]).length)){ cloudStatus('ok'); return true; }
   try{
     var mine={}; (S.boq||[]).forEach(function(b){ if(b&&b.id)mine[String(b.id)]=1; });
     var res=await fetch(SUPABASE_URL+'/rest/v1/'+cloudTable()
