@@ -24139,12 +24139,18 @@ function mrProjectState(pr){
           || ((pr.id==='elevation')?window.__APP_SEED_EL__:null);
     if(seed)cand.push({k:'file',v:seed});
   }catch(e){}
-  if(!cand.length){ MR_STATE_SRC[pr.id]='none'; return null; }
+  /* teenon jagah ka wazan label me likh do — ek screenshot se hi pata chal jaye
+     ke asli data kahan mila aur kahan nahi */
+  var tally=['database','browser','file'].map(function(k){
+    var c=cand.filter(function(x){return x.k===k})[0];
+    return (k==='database'?'db':k==='browser'?'local':'file')+' '+(c?_wt(c.v):'—');
+  }).join(' · ');
+  if(!cand.length){ MR_STATE_SRC[pr.id]='none ('+tally+')'; return null; }
   cand.sort(function(a,b){
     var d=_wt(b.v)-_wt(a.v); if(d)return d;
     return (((b.v||{})._ver)||0)-(((a.v||{})._ver)||0);
   });
-  MR_STATE_SRC[pr.id]=cand[0].k+' ('+_wt(cand[0].v)+')';
+  MR_STATE_SRC[pr.id]=tally+' → '+cand[0].k;
   return cand[0].v;
 }
 function mrProjSummary(pr){
