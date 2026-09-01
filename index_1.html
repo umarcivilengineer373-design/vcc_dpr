@@ -24101,7 +24101,16 @@ function mrProjectState(pr){
   var ls=null, idb=MR_STATE_CACHE[pr.id]||null;
   try{ var raw=localStorage.getItem(pr.lsKey); if(raw)ls=JSON.parse(raw); }catch(e){}
   var pick=null;
-  if(ls&&idb) pick=(((idb._ver||0)>=(ls._ver||0))?idb:ls);
+  if(ls&&idb){
+    pick=(((idb._ver||0)>=(ls._ver||0))?idb:ls);
+    /* localStorage bhar jane par (bohot si photos) us me adhuri copy reh jati
+       hai jiska _ver phir bhi bara ho sakta hai. Agar chuni hui copy bilkul
+       khali ho aur doosri me data mojood ho, to doosri lo — khali copy kabhi
+       bhari copy par tarjeeh nahi payegi. */
+    var _wt=function(o){ try{ return (((o||{}).boq||[]).length)+Object.keys(((o||{}).days)||{}).length; }catch(e){ return 0; } };
+    var other=(pick===idb)?ls:idb;
+    if(_wt(pick)===0 && _wt(other)>0) pick=other;
+  }
   else pick=idb||ls;
   if(pick)return pick;
   try{
@@ -24160,7 +24169,20 @@ function mdMoney(v){ return fmtMoney(v); }
 function mdPct(a,b){ return b?(a/b*100):0; }
 /* full picture for one project, computed from its own saved state */
 function mrProjFull(pr){
-  var st=mrProjectState(pr)||{};
+  /* Jo project ABHI khula hai uska sach `S` me hai, mehfooz copy me nahi.
+     Pehle yahan hamesha mrProjectState() parha jata tha — agar us project ki
+     saved copy purani ya adhuri ho (localStorage bhar jane par aksar hoti hai,
+     "Saved" ke tooltip me yahi likha hai) to Work Plan me poora BOQ dikhta tha
+     magar Progress Dashboard 0 aur "No BOQ groups" dikhata tha. mrBuildBackup()
+     pehle se yahi ehtiyat karta hai — ab yeh bhi karega. */
+  var st=null;
+  try{
+    if(pr && pr.id===((typeof PROJ!=='undefined'&&PROJ&&PROJ.id)||'')){
+      try{ if(typeof flushSave==='function')flushSave(); }catch(e){}
+      st=S;
+    }
+  }catch(e){}
+  if(!st) st=mrProjectState(pr)||{};
   var procS=null; try{ procS=mrProcStats(st,pr); }catch(e){}
   var out=mrWithState(st,function(){
     var D=iso(new Date());
@@ -24869,6 +24891,13 @@ function openMasterDash(){
       mdBuild(true),{orient:'landscape',scale:70});
   };
   draw();
+  /* Doosre projects ka data unki apni IndexedDB me hota hai aur async aata hai.
+     Pehla draw() us se pehle chal jata tha, is liye jo project khula na ho wo
+     dashboard par khali (0 / "No BOQ groups") dikhta tha — kabhi ek, kabhi
+     doosra. Refresh dabane par theek ho jata tha kyunki wo mrLoadAllStates()
+     ke baad draw karta hai. Ab pehli baar bhi wahi hoga. */
+  try{ if(typeof mrLoadAllStates==='function')
+         mrLoadAllStates().then(function(){ try{ if(document.getElementById('mdOv'))draw(); }catch(e){} }); }catch(e){}
   liveStart();
 }
 function applyBrand(){
