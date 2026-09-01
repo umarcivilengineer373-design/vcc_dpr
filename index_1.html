@@ -23454,6 +23454,9 @@ function mrBackupHTML(){
       '<button class="primary" id="mrAppFull" style="padding:8px 18px;font-size:.86rem;font-weight:800;background:var(--good);border-color:var(--good)">⬇ App with full data (HTML)</button>'+
       '<button class="ghost" id="mrImportBtn" style="padding:8px 16px;font-size:.84rem;font-weight:700;border-color:var(--navy);color:var(--navy)">⬆ Import backup (JSON)</button>'+
       '<input type="file" id="mrImportInput" accept=".json,application/json" style="display:none">'+
+      '<button class="ghost" id="mrBoqOnlyBtn" style="padding:8px 16px;font-size:.84rem;font-weight:700">⚕ Restore BOQ only</button>'+
+      '<input type="file" id="mrBoqOnlyInput" accept=".json,application/json" style="display:none">'+
+      '<label style="display:flex;align-items:center;gap:7px;font-size:.82rem;color:var(--muted);margin-left:auto;cursor:pointer"><input type="checkbox" id="mrAutoBk"'+(abOn()?' checked':'')+'> har ghante apne aap backup</label>'+
     '</div>'+
     '<p style="font-size:.76rem;color:var(--muted);margin-top:12px;line-height:1.6">'+
       '<b>⬇ JSON</b> saves one project — every day, the BOQ and Work Plan, work orders and bills, the store, '+
@@ -23464,7 +23467,14 @@ function mrBackupHTML(){
       'Send that one file to anyone — they open it and everything is already there, no import needed.<br>'+
       '<b>⬆ Import backup (JSON)</b> loads a file back in. It takes either kind — one project\'s file, '+
       'or the all-projects file — and works out for itself which project each part belongs to. '+
-      'Whatever those projects hold now is replaced, so the app reloads once it is done.</p>';
+      'Whatever those projects hold now is replaced, so the app reloads once it is done.<br>'+
+      '<b>⚕ Restore BOQ only</b> puts a backup\'s BOQ back without touching days, photos or bills. '+
+      'Because the old item ids come back with it, every daily progress row that showed '+
+      '“(item removed from BOQ)” links up again.<br>'+
+      '<b>Har ghante apne aap backup</b> drops an all-projects file into Downloads each hour '+
+      '(<code>SiteApp-ALL-&lt;date&gt;-&lt;hh&gt;h.json</code>) plus one <code>DAILY</code> file a day. '+
+      'It checks the data first — if a project\'s BOQ or days have collapsed it writes nothing and warns you, '+
+      'so a broken app can never overwrite a good backup.</p>';
 }
 
 async function openMasterSettings(){
@@ -23643,11 +23653,171 @@ async function mrImportFile(f){
   setTimeout(function(){ try{ location.reload(); }catch(e){} },1200);
 }
 
+
+/* ================= sirf BOQ ki marammat =================================
+   Agar kisi wajah se project ka BOQ khali ho jaye, to poora project restore
+   karne ki zaroorat nahi — us se Sept ke naye din bhi chale jayenge. Yeh
+   sirf BOQ wapas rakhta hai, baqi sab jaisa hai waisa rehta hai. Purani ids
+   wapas aate hi daily progress rows khud-ba-khud dobara jurr jati hain. */
+function mrBoqFromFile(d){
+  if(!d||typeof d!=='object')return [];
+  var out=[];
+  if(d._backup==='siteapp-all-projects'&&Array.isArray(d.projects)){
+    d.projects.forEach(function(e){
+      if(e&&e.app&&Array.isArray(e.app.boq)&&e.app.boq.length)
+        out.push({project:e.project,boq:e.app.boq,savedAtText:d.savedAtText||e.savedAtText||''});
+    });
+    return out;
+  }
+  var env=(typeof bkReadEnvelope==='function')?bkReadEnvelope(d):null;
+  if(env&&env.app&&Array.isArray(env.app.boq)&&env.app.boq.length)
+    out.push({project:env.project,boq:env.app.boq,savedAtText:env.savedAtText||''});
+  return out;
+}
+/* kitni progress rows is BOQ se dobara jurr jayengi */
+function mrRelinkCount(pr,boq){
+  var ids={}; boq.forEach(function(b){ if(b&&b.id)ids[String(b.id)]=1; });
+  var st=null; try{ st=(typeof PROJ!=='undefined'&&PROJ&&PROJ.id===pr.id)?S:mrProjectState(pr); }catch(e){}
+  var tot=0,hit=0;
+  try{
+    Object.keys((st||{}).days||{}).forEach(function(dt){
+      ((st.days[dt]||{}).progress||[]).forEach(function(p){ tot++; if(ids[String(p.boqId)])hit++; });
+    });
+  }catch(e){}
+  return {total:tot,linked:hit};
+}
+async function mrRestoreBoqFile(f){
+  var text=await new Promise(function(res,rej){
+    var r=new FileReader(); r.onload=function(){res(r.result)}; r.onerror=function(){rej()}; r.readAsText(f);
+  }).catch(function(){ return null; });
+  if(text==null){ toast('That file could not be read.'); return; }
+  var d; try{ d=JSON.parse(text); }catch(e){ toast('That file is not a valid backup.'); return; }
+  var found=mrBoqFromFile(d);
+  if(!found.length){ toast('That file has no BOQ in it.'); return; }
+
+  var plan=[];
+  found.forEach(function(f2){
+    var pr=mrFindProject(f2.project); if(!pr)return;
+    var st=null; try{ st=(typeof PROJ!=='undefined'&&PROJ&&PROJ.id===pr.id)?S:mrProjectState(pr); }catch(e){}
+    var now=((st||{}).boq||[]).length;
+    var rl=mrRelinkCount(pr,f2.boq);
+    plan.push({pr:pr,boq:f2.boq,now:now,rl:rl});
+  });
+  if(!plan.length){ toast('None of the projects in that file are on this computer.'); return; }
+
+  var lines=plan.map(function(x){
+    return '  • '+x.pr.name+' — abhi '+x.now+' items, file me '+x.boq.length+
+           '  ·  '+x.rl.linked+'/'+x.rl.total+' progress rows dobara jurengi';
+  }).join('\n');
+  if(!(await uiConfirm('Sirf BOQ wapas rakhein? Din, photos, bills — kuch aur nahi chhera jayega.\n\n'+lines+
+      (found[0].savedAtText?('\n\nFile ki tareekh: '+found[0].savedAtText):'')+
+      '\n\nApp iske baad dobara load hogi.','Restore BOQ')))return;
+
+  var done=0;
+  plan.forEach(function(x){
+    var st=null;
+    try{ st=(typeof PROJ!=='undefined'&&PROJ&&PROJ.id===x.pr.id)?JSON.parse(JSON.stringify(S)):mrProjectState(x.pr); }catch(e){}
+    if(!st)return;
+    st=JSON.parse(JSON.stringify(st));
+    st.boq=JSON.parse(JSON.stringify(x.boq));
+    if(mrWriteProjectState(x.pr,st,null))done++;
+  });
+  toast('✅ BOQ wapas rakh diya — '+done+' project(s). Reload ho raha hai…');
+  setTimeout(function(){ try{ location.reload(); }catch(e){} },1400);
+}
+
+
+/* ================= har ghante ka apne aap backup ========================
+   Har ghante Downloads me ek file girti hai (ghante ke naam se), aur din me
+   ek dafa alag "DAILY" file bhi. Likhne se pehle sehat dekhi jati hai: agar
+   kisi project ka BOQ ya din achanak gir jayen to backup NAHI likha jata —
+   warna kharab data acha backup kha jata hai. */
+var AB_KEY='siteapp_autobackup_v1';
+function abLoad(){ try{ return JSON.parse(localStorage.getItem(AB_KEY)||'{}')||{}; }catch(e){ return {}; } }
+function abSave(o){ try{ localStorage.setItem(AB_KEY,JSON.stringify(o)); }catch(e){} }
+function abOn(){ var o=abLoad(); return o.on!==false; }          /* default: chalu */
+function abSetOn(v){ var o=abLoad(); o.on=!!v; abSave(o); }
+function ab2(n){ return (n<10?'0':'')+n; }
+function abStamp(){ var d=new Date(); return {day:iso(d), hour:ab2(d.getHours())}; }
+
+/* har project ke gine hue numbers — sehat ka paimana */
+function abCounts(){
+  var out={};
+  try{
+    allProjects().forEach(function(p){
+      var st=null;
+      try{ st=(typeof PROJ!=='undefined'&&PROJ&&PROJ.id===p.id)?S:mrProjectState(p); }catch(e){}
+      out[p.id]={ boq:(((st||{}).boq)||[]).length, days:Object.keys(((st||{}).days)||{}).length };
+    });
+  }catch(e){}
+  return out;
+}
+/* pichle backup se muqabla: kya kuch achanak gir gaya? */
+function abCheckHealth(now,prev){
+  var bad=[];
+  if(!prev)return bad;
+  Object.keys(now).forEach(function(id){
+    var a=now[id], b=prev[id]; if(!b)return;
+    if(b.boq>0 && a.boq===0)  bad.push(id+': BOQ '+b.boq+' → 0');
+    if(b.days>0 && a.days===0)bad.push(id+': din '+b.days+' → 0');
+  });
+  return bad;
+}
+function abBuildPack(){
+  var list=allProjects(), out=[];
+  list.forEach(function(pr){ var d=mrBuildBackup(pr); if(d)out.push(d); });
+  if(!out.length)return null;
+  return { _backup:'siteapp-all-projects', _version:BK_VER, savedAt:Date.now(),
+           savedAtText:(function(){ try{ return wfFmtTs(Date.now()); }catch(e){ return ''; } })(),
+           savedBy:'auto-backup',
+           master:(function(){ try{ return mrLoad(); }catch(e){ return null; } })(),
+           projects:out };
+}
+var _abBusy=false;
+function abTick(){
+  if(_abBusy||!abOn())return;
+  var st=abStamp(), o=abLoad();
+  var needHour=(o.lastHour!==st.day+'-'+st.hour);
+  var needDay =(o.lastDay!==st.day);
+  if(!needHour&&!needDay)return;
+  /* app abhi theek se khadi hui hai? warna kuch mat likho */
+  var now=abCounts(); var anyData=Object.keys(now).some(function(k){ return now[k].days>0; });
+  if(!anyData)return;
+  var bad=abCheckHealth(now,o.counts);
+  if(bad.length){
+    o.warned=st.day+'-'+st.hour; abSave(o);
+    try{ toast('⚠ Auto-backup rok diya — '+bad.join(' · ')+'. Data theek karne ke baad hi backup banega.'); }catch(e){}
+    return;
+  }
+  _abBusy=true;
+  try{
+    var pack=abBuildPack();
+    if(pack){
+      var txt=JSON.stringify(pack,null,1);
+      if(needHour){ mrDownload('SiteApp-ALL-'+st.day+'-'+st.hour+'h.json',txt); o.lastHour=st.day+'-'+st.hour; }
+      if(needDay){  mrDownload('SiteApp-ALL-DAILY-'+st.day+'.json',txt);      o.lastDay=st.day; }
+      o.counts=now; abSave(o);
+    }
+  }catch(e){ console.warn('auto-backup',e); }
+  finally{ _abBusy=false; }
+}
+/* har 5 minute dekh lo — ghanta badla ya nahi. Pehli baar 90 sec baad, taake
+   app poori tarah khari ho jaye. */
+try{ setTimeout(abTick,90000); setInterval(abTick,5*60*1000); }catch(e){}
+window.abTick=abTick;
+
 function mrWire(ov){
   if(!ov)return;
   ov.querySelectorAll('.mr-bk1').forEach(function(b){ b.onclick=function(){ mrBackupOne(b.dataset.id); }; });
   var aj=ov.querySelector('#mrAllJson'); if(aj)aj.onclick=function(){ mrBackupAllJson(); };
   var af=ov.querySelector('#mrAppFull'); if(af)af.onclick=function(){ mrExportAppFull(); };
+  var bo=ov.querySelector('#mrBoqOnlyBtn'); var bof=ov.querySelector('#mrBoqOnlyInput');
+  if(bo&&bof){ bo.onclick=function(){ bof.click(); };
+    bof.onchange=function(e){ var f=e.target.files[0]; e.target.value=''; if(f)mrRestoreBoqFile(f); }; }
+  var ab=ov.querySelector('#mrAutoBk');
+  if(ab)ab.onchange=function(){ abSetOn(ab.checked);
+    toast(ab.checked?'Auto-backup chalu — har ghante Downloads me file aayegi.':'Auto-backup band kar diya.');
+    if(ab.checked){ try{ abTick(); }catch(e){} } };
   var im=ov.querySelector('#mrImportBtn'); var imf=ov.querySelector('#mrImportInput');
   if(im&&imf){ im.onclick=function(){ imf.click(); };
     imf.onchange=function(e){ var f=e.target.files[0]; e.target.value=''; if(f)mrImportFile(f); }; }
