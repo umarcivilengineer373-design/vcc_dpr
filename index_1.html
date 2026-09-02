@@ -26052,6 +26052,49 @@ function mrLoadCloudStates(){
 }
 window.mrLoadCloudStates=mrLoadCloudStates;
 
+
+/* ===== ek dafa ki safai: 01-Sep-2026 wali ghalat pile row =================
+   01 September 2026 ko Elevation par 100 piles ki entry test ke taur par ki
+   gayi thi aur module me delete kar di gayi thi — magar us waqt module aur app
+   ke darmiyan sync toot-i hui thi (key match nahi karti thi), is liye wo row
+   app ke data me reh gayi. Dashboard 285 dikhata raha jabke asal 185 hai.
+   Yeh safai sirf EK BAAR chalti hai aur sirf usi ek qatar ko hatati hai. */
+(function(){
+  var FLAG='siteapp_fix_piles_20260901';
+  try{ if(localStorage.getItem(FLAG)) return; }catch(e){ return; }
+  function clean(){
+    var done=[];
+    try{
+      allProjects().forEach(function(pr){
+        if(!pr || pr.id!=='elevation') return;              /* sirf Elevation */
+        var isOpen=(typeof PROJ!=='undefined'&&PROJ&&PROJ.id===pr.id);
+        var st=null;
+        try{ st=isOpen?S:mrProjectState(pr); }catch(e){}
+        if(!st||!st.piles||!Array.isArray(st.piles.rows)) return;
+        var hit=0;
+        st.piles.rows=st.piles.rows.filter(function(r){
+          if(r && r.date==='2026-09-01' && (+r.el||0)===100){ hit+=100; return false; }
+          return true;
+        });
+        if(!hit) return;
+        try{ st._ver=(+st._ver||0)+1; }catch(e){}
+        var str=JSON.stringify(st);
+        try{ localStorage.setItem(pr.lsKey,str); }catch(e){}
+        try{ idbStateSetIn(pr.idb,str); }catch(e){}
+        try{ MR_STATE_CACHE[pr.id]=st; }catch(e){}
+        if(isOpen){ try{ S=st; save(true); }catch(e){} }
+        done.push(pr.name);
+      });
+    }catch(e){}
+    try{ localStorage.setItem(FLAG,'1'); }catch(e){}
+    if(done.length){ try{ console.info('Pile row 01-Sep-2026 saaf: '+done.join(', ')); }catch(e){} }
+  }
+  /* IndexedDB se copies aane ke baad chalao */
+  try{ setTimeout(function(){
+    try{ mrLoadAllStates().then(clean); }catch(e){ clean(); }
+  }, 3000); }catch(e){}
+})();
+
 function mrLoadAllStates(){
   try{ mrLoadCloudStates().then(function(){
     try{ if(document.getElementById('mdOv')&&typeof MD_REDRAW==='function')MD_REDRAW(); }catch(e){}
