@@ -6043,7 +6043,7 @@ input.bd-drop{appearance:none;-webkit-appearance:none;cursor:text;padding-right:
     <div class="card-h" bis_skin_checked="1"><h2>Concrete Record — <span id="concDateLabel">Tue, 15 Sept 2026</span></h2><span class="hint">pours on this day</span>
       <span class="spacer"></span>
       <input type="file" id="concImpFile" accept=".xlsx,.xls,.csv" style="display:none">
-      <button class="ghost" id="concImport" style="padding:5px 12px;font-size:.78rem;border-color:#1f8f4e;color:#1f8f4e" title="Read an Excel of earlier ready-mix pours — every line lands on its own date">⬆ Import Excel</button>
+      <button class="ghost" id="concImport" style="padding:5px 12px;font-size:.78rem;border-color:#1f8f4e;color:#1f8f4e" title="Read an Excel of earlier ready-mix pours — every line lands on its own date (master password)">🔒 Import Excel</button>
       <button class="ghost" id="concFormat" style="padding:5px 12px;font-size:.78rem" title="Download the blank format to fill">⬇ Format</button>
       <button class="ghost" id="printConc" style="padding:5px 12px;font-size:.78rem">🖨 Print</button>
       <button class="ghost" id="concEditBtn" style="padding:5px 12px;font-size:.78rem">🔓 Edit (Admin)</button>
@@ -23083,6 +23083,58 @@ function renderProg(){
 }
 
 /* ================= concrete sheet ================= */
+/* ---- Design Mix: a list, not free typing --------------------------------
+   The grades come from the specification itself — every BOQ line that names a
+   strength ("Concrete Pouring of Piles (4000 Psi)" gives 4000 Psi) — plus any
+   grade already poured on site and anything added by hand from the drop-down.
+   Sorted by strength, so 1000 Psi comes before 4000 Psi.                    */
+function concMixList(){
+  var set={};
+  (S.boq||[]).forEach(function(b){
+    var m=String(b.name||'').match(/(\d[\d,\.]*)\s*psi/i);
+    if(m)set[m[1].replace(/,/g,'')+' Psi']=1;
+  });
+  Object.keys(S.days||{}).forEach(function(d){
+    ((S.days[d]||{}).concrete||[]).forEach(function(c){
+      var x=String(c.mix||'').trim(); if(x)set[x]=1;
+    });
+  });
+  (S.mixes||[]).forEach(function(x){ x=String(x||'').trim(); if(x)set[x]=1; });
+  var out=Object.keys(set);
+  if(!out.length)out=['1000 Psi','2000 Psi','2500 Psi','3000 Psi','3500 Psi','4000 Psi','5000 Psi','6000 Psi'];
+  out.sort(function(a,b){
+    var pa=parseFloat(String(a).replace(/[^0-9.]/g,''))||0, pb=parseFloat(String(b).replace(/[^0-9.]/g,''))||0;
+    if(pa!==pb)return pa-pb;
+    return String(a).localeCompare(String(b));
+  });
+  return out;
+}
+/* one drop-down cell for the grade, with a way to add one that is not listed */
+function concMixCell(cur){
+  var opts=concMixList(), c=String(cur==null?'':cur).trim();
+  return '<td><select class="cmix">'+
+    '<option value=""'+(c?'':' selected')+'>— design mix —</option>'+
+    (c&&opts.indexOf(c)<0?('<option value="'+esc(c)+'" selected>'+esc(c)+'</option>'):'')+
+    opts.map(function(o){ return '<option value="'+esc(o)+'"'+(o===c?' selected':'')+'>'+esc(o)+'</option>'; }).join('')+
+    '<option value="__new">+ add another grade…</option>'+
+    '</select></td>';
+}
+/* the drop-down's own change handler — "+ add another grade…" asks for it and keeps it */
+function concMixWire(sel,c,after){
+  if(!sel)return;
+  sel.addEventListener('change',async function(){
+    if(sel.value!=='__new'){ c.mix=sel.value; if(after)after(); return; }
+    sel.value=String(c.mix||'');
+    var v=null;
+    try{ v=await uiPrompt('Design mix / grade — type it as it reads on the specification, e.g. 5000 Psi',''); }catch(e){ v=null; }
+    v=String(v==null?'':v).trim();
+    if(!v){ if(after)after(); return; }
+    S.mixes=Array.isArray(S.mixes)?S.mixes:[];
+    if(S.mixes.indexOf(v)<0)S.mixes.push(v);
+    c.mix=v;
+    if(after)after();
+  });
+}
 /* ---- Concrete entry form (full-size, date-wise) ---- */
 let cmRows=[];let cmEdit=false;
 let cmShowErr=false;
@@ -23130,7 +23182,7 @@ function renderCmTable(){
     tr.innerHTML=
       selCell('citem',cItems.map(b=>b.name),c.item,'— select from BOQ —')+
       selCell('cfloor',cFloors,c.floor,'— floor —')+
-      `<td><input type="text" class="cmix" value="${esc(String(c.mix??''))}"></td>`+
+      concMixCell(c.mix)+
       selCell('cseg',S.segments,c.segment,'— segment —')+
       selCell('cven',S.vendors,c.vendor,'— vendor —')+
       `<td><input type="text" class="ctm" value="${esc(String(c.tm??''))}"></td>`+
@@ -23150,7 +23202,8 @@ function renderCmTable(){
     tr.querySelector('.cfloor').addEventListener('change',e=>{c.floor=e.target.value;updCmCount()});
     tr.querySelector('.cseg').addEventListener('change',e=>{c.segment=e.target.value;updCmCount()});
     tr.querySelector('.cven').addEventListener('change',e=>{c.vendor=e.target.value;updCmCount()});
-    [['cmix','mix'],['ctm','tm'],['cslip','slip'],['cunit','unit'],['cqty','qty']].forEach(([cls,k])=>
+    concMixWire(tr.querySelector('.cmix'),c,()=>{updCmCount();renderCmTable()});
+    [['ctm','tm'],['cslip','slip'],['cunit','unit'],['cqty','qty']].forEach(([cls,k])=>
       tr.querySelector('.'+cls).addEventListener('input',e=>{c[k]=e.target.value;updCmCount()}));
     tr.querySelector('.xbtn').onclick=()=>{cmRows.splice(i,1);if(!cmRows.length)cmRows.push(cmBlank());renderCmTable()};
     /* highlight required cells left blank (after a failed save attempt) */
@@ -23233,7 +23286,7 @@ function renderConc(){
     tr.innerHTML=
       selCell('citem',cItems.map(b=>b.name),c.item,'— select from BOQ —')+
       selCell('cfloor',floors,c.floor,'— floor —')+
-      `<td><input type="text" class="cmix" value="${esc(String(c.mix??''))}"></td>`+
+      concMixCell(c.mix)+
       selCell('cseg',S.segments,c.segment,'— segment —')+
       selCell('cven',S.vendors,c.vendor,'— vendor —')+
       `<td><input type="text" class="ctm" value="${esc(String(c.tm??''))}"></td>`+
@@ -23256,7 +23309,8 @@ function renderConc(){
     tr.querySelector('.cfloor').addEventListener('change',e=>{c.floor=e.target.value;save();renderConcHistoryDebounced()});
     tr.querySelector('.cseg').addEventListener('change',e=>{c.segment=e.target.value;save();renderConcHistoryDebounced()});
     tr.querySelector('.cven').addEventListener('change',e=>{c.vendor=e.target.value;save();renderConcHistoryDebounced()});
-    [['cmix','mix'],['ctm','tm'],['cslip','slip'],['cunit','unit'],['cqty','qty']].forEach(([cls,k])=>
+    concMixWire(tr.querySelector('.cmix'),c,function(){ save(); renderConc(); renderConcHistoryDebounced(); });
+    [['ctm','tm'],['cslip','slip'],['cunit','unit'],['cqty','qty']].forEach(([cls,k])=>
       tr.querySelector('.'+cls).addEventListener('input',e=>{c[k]=e.target.value;save();renderConcHistoryDebounced()}));
     const sAdd=tr.querySelector('.slipadd');
     if(sAdd)sAdd.onclick=()=>{slipTarget=c;$('slipInput').click()};
@@ -45529,6 +45583,18 @@ storageNote();
     return have;
   }
 
+  /* every slip number already in the register — a slip is one delivery document,
+     so the same number twice is a mistake, not a second trip */
+  function ciHaveSlips(){
+    var m={};
+    Object.keys(S.days||{}).forEach(function(d){
+      ((S.days[d]||{}).concrete||[]).forEach(function(c){
+        var sp=S2(c.slip).toLowerCase(); if(sp)m[sp]=(m[sp]||0)+1;
+      });
+    });
+    return m;
+  }
+
   /* ---------------- reading the sheet ---------------- */
   async function ciRead(file){
     await loadXLSX();
@@ -45567,17 +45633,45 @@ storageNote();
   }
 
   /* ---------------- the preview dialog ---------------- */
-  var CI={rows:[],skip:0,mode:'add',refused:null,sheet:''};
+  var CI={rows:[],skip:0,mode:'add',refused:null,sheet:'',skipDup:true};
 
+  /* Splitting the sheet three ways:
+       dup      — already in the register, line for line
+       badSlip  — a Slip # used twice (in the sheet, or already on record). A delivery
+                  slip is a one-off document, so this is a data-entry mistake and it is
+                  held back unless the user says to bring it in anyway.
+       sameLine — an identical line with NO slip number. Six trips of 3.75 m3 on the
+                  same TM in one day look identical and are perfectly real, so these
+                  are only reported, never held back.                                */
   function ciSplit(){
-    var have=ciHave(), seen={}, fresh=[], dup=[];
+    var replace=(CI.mode==='replace');
+    var have=replace?{}:ciHave();
+    var slipHave=replace?{}:ciHaveSlips();
+    var seen={}, slipSheet={}, fresh=[], dup=[], badSlip=[], sameLine=[], flagged=[];
     CI.rows.forEach(function(r){
-      if(CI.mode==='replace'){ fresh.push(r); return; }
+      r.__flag='';
+      var sp=S2(r.slip).toLowerCase();
+      if(sp){
+        slipSheet[sp]=(slipSheet[sp]||0)+1;
+        if(slipSheet[sp]>1)r.__flag='twice';
+        else if(slipHave[sp])r.__flag='onrecord';
+      }
       var k=ciKey(r);
       seen[k]=(seen[k]||0)+1;
-      if(seen[k]<=(have[k]||0))dup.push(r); else fresh.push(r);
+      if(!replace&&seen[k]<=(have[k]||0)){ dup.push(r); return; }
+      if(!sp&&seen[k]>1)sameLine.push(r);
+      if(r.__flag)flagged.push(r);
+      if(r.__flag&&CI.skipDup){ badSlip.push(r); return; }
+      fresh.push(r);
     });
-    return {fresh:fresh,dup:dup};
+    return {fresh:fresh,dup:dup,badSlip:badSlip,sameLine:sameLine,flagged:flagged};
+  }
+  /* "20771 (3 times), 20775 (twice)" — the slips that repeat, for the warning */
+  function ciSlipList(rows){
+    var c={}; rows.forEach(function(r){ var sp=S2(r.slip); if(sp)c[sp]=(c[sp]||0)+1; });
+    var ks=Object.keys(c).sort(function(a,b){ return c[b]-c[a]; });
+    return ks.slice(0,10).map(function(k){ return k+' ('+(c[k]+1)+'\u00d7)'; }).join(', ')+
+           (ks.length>10?(' … +'+(ks.length-10)+' more'):'');
   }
 
   function ciPanel(){
@@ -45614,14 +45708,35 @@ storageNote();
         tile('Lines',rows.length)+tile('Days',[].concat.apply([],dates.map(function(d){return [d]})).filter(function(v,i,a){return a.indexOf(v)===i}).length)+
         tile('Grades',Object.keys(mixes).length)+tile('Total Qty',fmt(q))+
         tile('New',sp.fresh.length,'#1f6b41')+tile('Already in',sp.dup.length,sp.dup.length?'#8a5c0d':'var(--muted)')+
+        tile('Duplicate slips',sp.flagged.length,sp.flagged.length?'#b3392f':'var(--muted)')+
       '</div>';
+    /* ---- the duplicate warning ---- */
+    if(sp.flagged.length){
+      var twice=sp.flagged.filter(function(r){ return r.__flag==='twice'; });
+      var onrec=sp.flagged.filter(function(r){ return r.__flag==='onrecord'; });
+      h+='<div style="background:#fdecea;border:1px solid #f0c9c2;border-left:5px solid #b3392f;color:#8a2c24;border-radius:9px;padding:10px 13px;font-size:.79rem;line-height:1.65;margin-bottom:12px">'+
+         '<b>&#9888; '+sp.flagged.length+' line(s) carry a Slip # that is used more than once.</b> '+
+         'A delivery slip is a one-off document, so this is almost always a typing mistake in the sheet.'+
+         (twice.length?('<div style="margin-top:5px"><b>'+twice.length+'</b> repeat a slip inside this sheet — '+X(ciSlipList(twice))+'</div>'):'')+
+         (onrec.length?('<div style="margin-top:5px"><b>'+onrec.length+'</b> use a slip that is already on record — '+X(ciSlipList(onrec))+'</div>'):'')+
+         '<div style="margin-top:8px">'+
+           '<button type="button" class="ghost ci-dup" data-v="'+(CI.skipDup?'0':'1')+'" style="padding:4px 12px;font-size:.75rem;font-weight:700;border-color:#b3392f;color:#8a2c24">'+
+             (CI.skipDup?'Bring them in anyway':'&#10003; Hold them back again')+'</button>'+
+           '<span style="margin-left:9px;font-size:.74rem">'+(CI.skipDup?'They are being held back — fix the slip numbers in the sheet and import again.':'They will come in as they are.')+'</span>'+
+         '</div></div>';
+    }
+    if(sp.sameLine.length)
+      h+='<div style="background:#fff6e6;border:1px solid #f0dcb4;color:#8a5c0d;border-radius:9px;padding:9px 12px;font-size:.78rem;line-height:1.6;margin-bottom:12px">'+
+         '<b>'+sp.sameLine.length+' line(s) repeat another line word for word</b> and carry <b>no slip number</b>, so there is nothing to tell them apart. '+
+         'On a ready-mix sheet that is normal — several trips of the same size on the same TM in one day — so they come in as separate pours. '+
+         'If they are not, put the slip numbers in the sheet and import again.</div>';
     if(CI.skip)
       h+='<div style="background:#fff6e6;border:1px solid #f0dcb4;color:#8a5a00;border-radius:9px;padding:9px 12px;font-size:.78rem;margin-bottom:11px">'+
          '<b>'+CI.skip+' line(s) were left out</b> — they had no readable date or no quantity.</div>';
     if(sp.dup.length&&CI.mode==='add')
       h+='<div style="background:#fff6e6;border:1px solid #f0dcb4;color:#8a5c0d;border-radius:9px;padding:9px 12px;font-size:.78rem;line-height:1.6;margin-bottom:12px">'+
          '<b>'+sp.dup.length+' line(s) are already recorded</b> — same date, grade, TM, slip and quantity. They are left as they are.</div>';
-    var show=sp.fresh.concat(sp.dup);
+    var show=sp.fresh.concat(sp.badSlip,sp.dup);
     h+='<div class="tblwrap" style="max-height:330px;overflow:auto"><table class="grid"><thead><tr>'+
       '<th style="width:32px">#</th><th style="width:96px">Date</th><th style="width:88px">Design Mix</th>'+
       '<th style="min-width:180px">Item / Work (from BOQ)</th><th>Floor</th><th>Segment</th><th>Vendor</th>'+
@@ -45629,8 +45744,9 @@ storageNote();
       '<th style="width:70px;text-align:center">Status</th></tr></thead><tbody>'+
       show.slice(0,400).map(function(r,i){
         var isNew=i<sp.fresh.length;
+        var isBad=!!r.__flag;
         var it=r.item||ciItem(ciMix(r.mix),r.floor,r.seg);
-        return '<tr'+(isNew?'':' style="opacity:.55"')+'><td class="dim" style="text-align:center">'+(i+1)+'</td>'+
+        return '<tr'+(isBad?' style="background:#fdf1ef"':(isNew?'':' style="opacity:.55"'))+'><td class="dim" style="text-align:center">'+(i+1)+'</td>'+
           '<td style="white-space:nowrap">'+woFmtDate(r.date)+'</td>'+
           '<td style="text-align:center"><b>'+X(ciMix(r.mix)||'—')+'</b></td>'+
           '<td style="font-size:.76rem">'+(it?X(it):'<span style="color:var(--bad)">— not matched to a BOQ item —</span>')+'</td>'+
@@ -45638,10 +45754,11 @@ storageNote();
           '<td style="font-size:.76rem">'+X(r.ven||'—')+'</td>'+
           '<td style="text-align:center">'+X(r.tm||'—')+'</td><td style="text-align:center">'+X(r.slip||'—')+'</td>'+
           '<td style="text-align:right;font-weight:700">'+fmt(r.qty)+'</td>'+
-          '<td style="text-align:center;font-size:.7rem;font-weight:800;color:'+(isNew?'#1f6b41':'#8a5c0d')+'">'+(isNew?'NEW':'HAVE IT')+'</td></tr>';
+          '<td style="text-align:center;font-size:.7rem;font-weight:800;color:'+(isNew?'#1f6b41':(isBad?'#b3392f':'#8a5c0d'))+'">'+
+            (isNew?'NEW':(isBad?(r.__flag==='onrecord'?'SLIP ON RECORD':'SLIP TWICE'):'HAVE IT'))+'</td></tr>';
       }).join('')+'</tbody></table></div>'+
       (show.length>400?('<div style="font-size:.72rem;color:var(--muted);margin-top:6px">Showing the first 400 of '+show.length+' line(s) — all of them come in.</div>'):'');
-    return {html:h, fresh:sp.fresh, dup:sp.dup};
+    return {html:h, fresh:sp.fresh, dup:sp.dup, badSlip:sp.badSlip, sameLine:sp.sameLine};
   }
 
   function ciApply(fresh){
@@ -45680,9 +45797,10 @@ storageNote();
     var go=ov.querySelector('#ciGo');
     if(go){
       go.style.display=P.fresh.length?'':'none';
-      go.textContent=(CI.mode==='replace')
+      go.textContent=((CI.mode==='replace')
         ? ('♻ Replace with '+P.fresh.length+' pour(s)')
-        : ('✔ Import '+P.fresh.length+' new pour(s)');
+        : ('✔ Import '+P.fresh.length+' new pour(s)'))
+        + (P.badSlip.length?(' · '+P.badSlip.length+' held back'):'');
       go.onclick=async function(){
         if(CI.mode==='replace'){
           var had=0; Object.keys(S.days||{}).forEach(function(d){ had+=(((S.days[d]||{}).concrete)||[]).length; });
@@ -45691,13 +45809,17 @@ storageNote();
         }
         var res=ciApply(P.fresh);
         ov.remove();
-        toast((CI.mode==='replace')
+        toast(((CI.mode==='replace')
           ? ('♻ Concrete register replaced — '+res.n+' pour(s) across '+res.days+' day(s). The old ones are kept aside.')
-          : ('✔ '+res.n+' pour(s) added across '+res.days+' day(s)'+(P.dup.length?(' · '+P.dup.length+' were already there'):'')+'.'));
+          : ('✔ '+res.n+' pour(s) added across '+res.days+' day(s)'+(P.dup.length?(' · '+P.dup.length+' were already there'):'')+'.'))
+          +(P.badSlip.length?(' ⚠ '+P.badSlip.length+' line(s) with a repeated slip # were left out.'):''));
       };
     }
     ov.querySelectorAll('.ci-mode').forEach(function(b){
       b.onclick=function(){ CI.mode=b.dataset.m; ciPaint(ov); };
+    });
+    ov.querySelectorAll('.ci-dup').forEach(function(b){
+      b.onclick=function(){ CI.skipDup=(b.dataset.v==='1'); ciPaint(ov); };
     });
   }
 
@@ -45724,7 +45846,7 @@ storageNote();
       }
       got.rows=keep;
     }
-    CI={rows:got.rows, skip:got.skipped, mode:'add', refused:refused, sheet:got.sheet||''};
+    CI={rows:got.rows, skip:got.skipped, mode:'add', refused:refused, sheet:got.sheet||'', skipDup:true};
     var ov=mrOverlay('ciOv','⬆ Import Concrete Record','<div id="ciBody"></div>',
       '<button class="ghost" id="ciX">Close</button><button class="primary" id="ciGo">✔ Import</button>',1180);
     ov.style.zIndex='2147483100';
@@ -45762,11 +45884,31 @@ storageNote();
     toast('⬇ Format downloaded — fill it in Excel and use ⬆ Import Excel. Save it as .xlsx or .csv, either works.');
   }
 
+  /* ---------------- the master password guards the import ----------------
+     One sheet can lay months of record over what is already there, so the button
+     asks for the MASTER password first — the same one that opens Master Settings.
+     Only its hash is held here, never the password itself. */
+  var CI_MASTER='1770719213';
+  async function ciPass(){
+    var p=null;
+    try{ p=await pinDialog('\u{1F510} Enter the MASTER password to import the concrete record:',false); }
+    catch(e){ return false; }
+    if(p===null)return false;
+    var h='';
+    try{ h=hashPin(String(p).trim()); }catch(e){ return false; }
+    var have='';
+    try{ var d=(typeof mrLoad==='function')?mrLoad():null; have=(d&&d.pass)||''; }catch(e){}
+    if(h===CI_MASTER||(have&&h===have))return true;
+    try{ toast('\u274c Wrong master password — the import stays locked.'); }catch(e){}
+    return false;
+  }
+
   /* ---------------- wiring ---------------- */
   function ciWire(){
     var imp=E('concImport'), f=E('concImpFile'), fmt=E('concFormat');
-    if(imp&&!imp.__w){ imp.__w=1; imp.onclick=function(){
+    if(imp&&!imp.__w){ imp.__w=1; imp.onclick=async function(){
       if(typeof roBlock==='function'&&roBlock())return;
+      if(!(await ciPass()))return;
       if(f)f.click(); }; }
     if(f&&!f.__w){ f.__w=1; f.addEventListener('change',function(e){
       var file=e.target.files&&e.target.files[0]; e.target.value='';
