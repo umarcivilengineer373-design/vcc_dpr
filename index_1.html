@@ -10286,6 +10286,7 @@ The Vertical" required=""></textarea>
     <div class="card-h" bis_skin_checked="1"><h2>Store Stock Summary</h2><span class="hint">builds itself from the Material In / Material Out entries</span>
       <span class="spacer"></span>
       <div class="field" style="min-width:150px;margin:0" bis_skin_checked="1"><label>As at date</label><input type="date" id="stDate"></div>
+      <button class="ghost viewer-hide" id="stAllRep" style="padding:5px 12px;font-size:.78rem;border-color:#b7952a;color:#8a6d1a" title="Empty this project's whole store — items, Material In and Material Out — keeping the old data aside so it can be undone">♻ Replace all store data</button>
       <button class="ghost" id="stPrint" style="padding:5px 12px;font-size:.78rem">🖨 Print</button>
       <button class="ghost" id="stCsv" style="padding:5px 12px;font-size:.78rem">⬇ Export CSV</button>
       <span class="pill total" id="stPill">85 items</span>
@@ -10321,6 +10322,7 @@ The Vertical" required=""></textarea>
       <span class="spacer"></span>
       <button class="primary" id="siAdd" style="padding: 6px 14px;">+ Add Entry</button>
       <button class="ghost" id="siFromGrn" style="padding: 5px 12px; font-size: 0.78rem; border-color: rgb(31, 143, 78); color: rgb(31, 143, 78);" title="Bring every GRN receipt from Procurement into the store as Material In">⬇ Import from GRN</button>
+      <button class="ghost viewer-hide" id="siGrnRep" style="padding:5px 12px;font-size:.78rem;border-color:#b7952a;color:#8a6d1a" title="Empty Material In and bring every GRN receipt in again — the old entries are kept aside, so this can be undone">♻ Replace all from GRN</button>
       <button class="ghost" id="siPrint" style="padding:5px 12px;font-size:.78rem">🖨 Print</button>
       <button class="ghost" id="siCsv" style="padding:5px 12px;font-size:.78rem">⬇ Export CSV</button>
       <span class="pill total" id="siPill">0</span>
@@ -11920,6 +11922,7 @@ window.__effBoot = function(){
     <div class="card-h" bis_skin_checked="1"><h2>Procurement</h2><span class="hint">PR · PO · IGP · GRN · summary &amp; dashboard</span>
       <span class="spacer"></span>
       <button class="primary admin-only" id="pcImport" style="padding:5px 14px;font-size:.78rem">⬆ Import Excel</button>
+      <button class="ghost admin-only" id="pcReplace" style="padding:5px 12px;font-size:.78rem;border-color:#b7952a;color:#8a6d1a" title="Import an Excel that REPLACES everything held here — the old registers are kept aside, so this can be undone">♻ Replace all (import)</button>
       <button class="ghost admin-only" id="pcSave" style="padding:5px 12px;font-size:.78rem;border-color:var(--good);color:var(--good)">💾 Save</button>
       <button class="ghost admin-only" id="pcSrcX" style="padding:5px 12px;font-size:.78rem;border-color:#1f8f4e;color:#1f8f4e" title="PR · PO · igp · GRN in the same format the sheet came in, plus the PR→PO→IGP→GRN chain">⬇ Export Excel</button>
       <button class="ghost admin-only" id="pcXlsx" style="padding:5px 12px;font-size:.78rem" title="The formatted procurement report (summary, dashboard figures, registers)">⬇ Report</button>
@@ -17859,6 +17862,7 @@ function renderStore(){
     return true;
   });
   var tb=$('stTable')?$('stTable').tBodies[0]:null; if(!tb)return;
+  try{ rplBanner('store.all',$('stTable').parentNode,function(){ renderStore(); }); }catch(e){}
   tb.innerHTML='';
   if($('stPill'))$('stPill').textContent=rows.length+(rows.length===1?' item':' items')+(rows.length!==allRows.length?(' / '+allRows.length):'');
   if(!rows.length){ tb.innerHTML='<tr><td colspan="6" style="color:var(--faint);padding:12px;font-size:.85rem">Nothing in the store yet — add a <b>Material In</b> entry and this sheet fills itself.</td></tr>'; return; }
@@ -18082,6 +18086,88 @@ function stAddEntry(kind,date,r,whoV,remV,issV){
    Procurement (GRN) but not in the store ends up unable to issue anything. This
    pulls those GRN receipts in as Material In entries, skipping anything already
    brought over before.                                                            */
+/* ================= Replace all data — with one-click undo =========================
+   Every "replace" first puts the register that is about to go into S._undo, so the
+   old entries are never actually lost: a yellow strip appears on the sheet with an
+   "Undo" button until the new data is accepted. Only the last replace of each
+   register is kept. */
+var RPL_LABEL={'store.out':'Material Out','store.in':'Material In','store.all':'the whole Store','proc':'Procurement'};
+function rplBox(){ S._undo=S._undo||{}; return S._undo; }
+function rplSnap(key,payload,note){
+  try{
+    rplBox()[key]={ at:Date.now(), note:note||'',
+      by:(typeof currentUser!=='undefined'&&currentUser)?(currentUser.name||''):'',
+      data:JSON.parse(JSON.stringify(payload==null?null:payload)) };
+  }catch(e){ console.warn('rplSnap',e); }
+}
+function rplGet(key){ try{ return (S._undo||{})[key]||null; }catch(e){ return null; } }
+function rplDrop(key){ try{ if(S._undo)delete S._undo[key]; }catch(e){} }
+function rplCount(u){
+  if(!u||!u.data)return 0;
+  if(Array.isArray(u.data))return u.data.length;
+  return ['items','in','out','prdr','po','igp','grn'].reduce(function(a,k){ return a+((u.data[k]||[]).length); },0);
+}
+function rplApply(key){
+  var u=rplGet(key); if(!u||!u.data)return false;
+  var d=u.data;
+  if(key==='store.out'){ storeState().out=d; }
+  else if(key==='store.in'){ storeState().in=d; }
+  else if(key==='store.all'){ var st=storeState(); st.items=d.items||[]; st.in=d.in||[]; st.out=d.out||[]; }
+  else if(key==='proc'){ var P=procState(); ['prdr','po','igp','grn'].forEach(function(k){ P[k]=d[k]||[]; }); }
+  else return false;
+  rplDrop(key); save(true); return true;
+}
+function rplWhen(t){ try{ return wfFmtTs(t); }catch(e){ return ''; } }
+/* the yellow strip: shown on the sheet while a replaced copy is still held */
+function rplBanner(key,beforeEl,after){
+  var id='rplB_'+key.replace(/[^a-z]/gi,'_'), host=document.getElementById(id);
+  var u=rplGet(key);
+  if(!u||!beforeEl){ if(host)host.remove(); return; }
+  if(!host){ host=document.createElement('div'); host.id=id;
+    try{ beforeEl.parentNode.insertBefore(host,beforeEl); }catch(e){ return; } }
+  var n=rplCount(u);
+  host.style.cssText='background:#fdf3e2;border:1px solid #e6c98a;border-left:5px solid #c98a1b;color:#8a6d1a;'+
+    'border-radius:10px;padding:9px 14px;margin:12px 0 0;font-size:.8rem;line-height:1.55;'+
+    'display:flex;gap:12px;align-items:center;flex-wrap:wrap';
+  host.innerHTML='<div style="flex:1;min-width:250px"><b>&#9851; '+esc(RPL_LABEL[key]||key)+' was replaced</b> — '+
+      n+' earlier entr'+(n===1?'y is':'ies are')+' still kept aside'+(u.by?(' · by '+esc(u.by)):'')+
+      (u.at?(' · '+esc(rplWhen(u.at))):'')+'.</div>'+
+    '<button type="button" class="ghost viewer-hide" data-a="undo" style="padding:5px 13px;font-size:.76rem;font-weight:700;border-color:#b7952a;color:#8a6d1a">&#8617; Undo — put them back</button>'+
+    '<button type="button" class="ghost viewer-hide" data-a="ok" style="padding:5px 11px;font-size:.74rem">&#10003; Keep the new data</button>';
+  host.querySelector('[data-a="undo"]').onclick=async function(){
+    if(typeof roBlock==='function'&&roBlock())return;
+    if(!(await uiConfirm('Put the earlier '+n+' entry(ies) back?\n\nWhatever replaced them is dropped.','Undo')))return;
+    if(rplApply(key)){ toast('\u21a9 Restored — '+n+' entry(ies) are back.'); if(typeof after==='function')after(); }
+  };
+  host.querySelector('[data-a="ok"]').onclick=function(){
+    rplDrop(key); save(true); if(typeof after==='function')after();
+  };
+}
+
+/* ================= one project's store holds only that project's material =========
+   Every issuance line carries the sub-segment it was issued against ("V4 BUSINESS
+   CENTRE V GRAND", "Elevation One (Pvt.) Limited" …). That name says which project
+   the line belongs to. A line whose sub-segment clearly belongs to ANOTHER project
+   is refused on import, and anything already sitting in the register is flagged so
+   it can be moved out in one click. A blank or unrecognised sub-segment is left
+   alone — only a clear match to a different project counts as foreign. */
+function stHereId(){ try{ return (typeof PROJ!=='undefined'&&PROJ&&PROJ.id)||''; }catch(e){ return ''; } }
+function stSubOwner(sub){ try{ return (typeof pcOwnerOf==='function')?pcOwnerOf(sub):''; }catch(e){ return ''; } }
+function stRowSub(r){ return String((r&&(r.subSeg||r.issSub||r.reqSub||r.proj))||'').trim(); }
+function stProjName(id){
+  try{ var p=(allProjects()||[]).filter(function(x){ return x.id===id; })[0]; return (p&&p.name)||id; }
+  catch(e){ return id; }
+}
+/* which lines do not belong here, and whose are they? */
+function stForeignInfo(rows){
+  var here=stHereId(), bad=[], who={};
+  if(here)(rows||[]).forEach(function(r){
+    var sub=stRowSub(r), o=stSubOwner(sub);
+    if(o&&o!==here){ bad.push(r); who[o]=who[o]||{}; who[o][sub||'—']=1; }
+  });
+  return { bad:bad, who:who,
+    names:Object.keys(who).map(function(id){ return stProjName(id)+' — '+Object.keys(who[id]).join(', '); }) };
+}
 function stGrnRows(){
   var out=[];
   try{
@@ -18090,24 +18176,48 @@ function stGrnRows(){
       if(!r)return;
       var item=String(r.item||'').trim(); if(!item)return;
       var q=stNum(r.qty); if(!(q>0))return;
+      var sub=String(r.proj||'').trim(), own=stSubOwner(sub), here=stHereId();
+      if(own&&here&&own!==here)return;               /* another project's GRN — not this store */
       out.push({ key:'grn:'+String(r.grn||'')+'|'+item+'|'+String(r.grnDate||''),
                  date:String(r.grnDate||''), item:item, unit:String(r.unit||'').trim(),
-                 qty:q, vendor:String(r.vendor||'').trim(),
+                 qty:q, vendor:String(r.vendor||'').trim(), subSeg:sub,
                  remarks:'GRN '+String(r.grn||'')+(r.wh?(' · '+String(r.wh)):'') });
     });
   }catch(e){}
   return out;
 }
-async function stImportGrn(){
+async function stImportGrn(replaceAll){
   if(typeof roBlock==='function'&&roBlock())return;
   if(typeof lkBlock==='function'&&lkBlock('storein'))return;
   var rows=stGrnRows();
   if(!rows.length){ toast('No GRN receipts found — import the procurement Excel first.'); return; }
   var st=storeState();
+  /* Replace all: Material In is emptied first (kept aside), then every GRN comes in */
+  if(replaceAll){
+    var had=(st.in||[]).length;
+    if(!(await uiConfirm('Replace all of Material In?\n\n'+had+' entry(ies) are taken out and all '+rows.length+
+      ' GRN receipt(s) put in their place.\n\nThe old entries are kept aside — one click undoes this.','Replace all')))return;
+    rplSnap('store.in',(st.in||[]).slice(),'replaced from GRN');
+    st.in=[];
+  }
   var have={};
   (st.in||[]).forEach(function(r){ if(r&&r.grnKey)have[r.grnKey]=1; });
   var fresh=rows.filter(function(r){ return !have[r.key]; });
   if(!fresh.length){ toast('Already up to date — all '+rows.length+' GRN receipt(s) are in the store.'); return; }
+  if(replaceAll){
+    var who2=(typeof currentUser!=='undefined'&&currentUser)?(currentUser.name||''):'', nw=Date.now();
+    fresh.forEach(function(r,i){
+      try{ stEnsureItem(r.item,r.unit); }catch(e){}
+      st.in.push({ id:'sg'+nw.toString(36)+i.toString(36),
+        date:r.date, item:r.item, unit:r.unit, qty:r.qty, vendor:r.vendor,
+        remarks:r.remarks, grnKey:r.key, subSeg:r.subSeg||'',
+        by:who2, desig:(typeof currentUser!=='undefined'&&currentUser?(currentUser.desig||''):''), at:nw });
+    });
+    save(true);
+    try{ renderStoreIn(); }catch(e){}
+    toast('\u267b Material In replaced — '+fresh.length+' GRN receipt(s) loaded. The old ones are kept aside.');
+    return;
+  }
   var names={}; fresh.forEach(function(r){ names[r.item]=1; });
   if(typeof uiConfirm==='function' &&
      !(await uiConfirm('Bring '+fresh.length+' GRN receipt(s) into the store as Material In?\n\n'+
@@ -18120,14 +18230,18 @@ async function stImportGrn(){
     try{ stEnsureItem(r.item,r.unit); }catch(e){}
     st.in.push({ id:'sg'+now.toString(36)+i.toString(36),
       date:r.date, item:r.item, unit:r.unit, qty:r.qty, vendor:r.vendor,
-      remarks:r.remarks, grnKey:r.key,
+      remarks:r.remarks, grnKey:r.key, subSeg:r.subSeg||'',
       by:who, desig:(typeof currentUser!=='undefined'&&currentUser?(currentUser.desig||''):''), at:now });
   });
   save(true);
   try{ renderStoreIn(); }catch(e){}
   toast('⬇ '+fresh.length+' GRN receipt(s) added to the store — '+Object.keys(names).length+' item(s).');
 }
-if($('siFromGrn'))$('siFromGrn').onclick=stImportGrn;
+if($('siFromGrn'))$('siFromGrn').onclick=function(){ stImportGrn(false); };
+if($('siGrnRep'))$('siGrnRep').onclick=async function(){
+  if(typeof requireDelPass==='function' && !(await requireDelPass('Enter ADMIN password to replace all of Material In:')))return;
+  stImportGrn(true);
+};
 
 /* ---------- registers ---------- */
 var ST_SEL={siItem:[],siVen:[],soItem:[],soTo2:[],stItem:[],sldItem:[]};
@@ -18255,7 +18369,7 @@ function stImpSplit(rows){
   });
   return {fresh:fresh,dup:dup};
 }
-var ST_IMP={rows:[],subs:[],pick:[]};
+var ST_IMP={rows:[],subs:[],pick:[],refused:null,mode:'add'};
 function stImpFiltered(){
   var p=ST_IMP.pick;
   if(!p.length)return ST_IMP.rows.slice();
@@ -18263,7 +18377,8 @@ function stImpFiltered(){
 }
 function stImpPanel(){
   var rows=stImpFiltered();
-  var sp=stImpSplit(rows);
+  /* "Replace all" wipes the register first, so nothing counts as a duplicate */
+  var sp=(ST_IMP.mode==='replace')?{fresh:rows.slice(),dup:[]}:stImpSplit(rows);
   var items={},depts={},minD='',maxD='',qty=0,val=0,noDate=0;
   rows.forEach(function(r){
     items[r.item]=1; if(r.dept)depts[r.dept]=1;
@@ -18279,7 +18394,27 @@ function stImpPanel(){
     return '<button type="button" class="ghost st-imp-sub" data-s="'+esc(s)+'" style="padding:3px 11px;font-size:.74rem;'+
       (on?'background:var(--navy);color:#fff;border-color:var(--navy)':'')+'">'+esc(s)+'</button>';
   }).join(' ');
-  var h='<div style="font-size:.78rem;color:#5b6b7b;line-height:1.6;margin-bottom:10px">'+
+  var h='';
+  if(ST_IMP.refused&&ST_IMP.refused.bad.length)
+    h+='<div style="background:#fdecea;border:1px solid #f0c9c2;border-left:5px solid #b3392f;color:#8a2c24;border-radius:9px;padding:9px 12px;font-size:.78rem;line-height:1.6;margin-bottom:11px">'+
+       '<b>⛔ '+ST_IMP.refused.bad.length+' line(s) were refused</b> — they were issued against '+
+       esc(ST_IMP.refused.names.join(' · '))+', not '+esc((typeof PROJ!=='undefined'&&PROJ)?PROJ.name:'this project')+
+       '. Only this project&rsquo;s material can come into this store; import those lines from inside that project.</div>';
+  var chip=function(m,t,d){
+    var on=(ST_IMP.mode===m);
+    return '<button type="button" class="ghost st-imp-mode" data-m="'+m+'" style="padding:6px 13px;font-size:.78rem;font-weight:700;text-align:left;'+
+      (on?(m==='replace'?'background:#b3392f;color:#fff;border-color:#b3392f':'background:var(--navy);color:#fff;border-color:var(--navy)'):'')+'">'+
+      t+'<div style="font-size:.68rem;font-weight:600;opacity:.85">'+d+'</div></button>';
+  };
+  h+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:11px">'+
+      chip('add','&#10133; Add new only','keeps what is already in the register')+
+      chip('replace','&#9851; Replace all data','empties Material Out first, then loads this sheet')+
+    '</div>';
+  if(ST_IMP.mode==='replace')
+    h+='<div style="background:#fdf3e2;border:1px solid #e6c98a;border-left:5px solid #c98a1b;color:#8a6d1a;border-radius:9px;padding:9px 12px;font-size:.78rem;line-height:1.6;margin-bottom:11px">'+
+       '<b>&#9851; Replace all</b> — the <b>'+((storeState().out||[]).length)+'</b> entr'+(((storeState().out||[]).length)===1?'y':'ies')+
+       ' now in Material Out will be taken out and this sheet loaded in their place. They are <b>kept aside</b>, so one click can undo it.</div>';
+  h+='<div style="font-size:.78rem;color:#5b6b7b;line-height:1.6;margin-bottom:10px">'+
       'Read <b>'+ST_IMP.rows.length+'</b> issue line(s) from the sheet'+
       (minD?(' · <b>'+woFmtDate(minD)+'</b> to <b>'+woFmtDate(maxD)+'</b>'):'')+'.</div>';
   if(ST_IMP.subs.length>1)
@@ -18320,6 +18455,10 @@ function stImpPanel(){
 }
 function stImpApply(fresh){
   var st=storeState(), n=0;
+  if(ST_IMP.mode==='replace'){
+    rplSnap('store.out',(st.out||[]).slice(),'replaced by an issuance sheet');
+    st.out=[];
+  }
   fresh.forEach(function(r){
     var it=stItemByName(r.item);
     var unit=r.unit||(it?it.unit:'')||'';
@@ -18352,13 +18491,25 @@ function stImpPaint(ov){
   var go=ov.querySelector('#stImpGo');
   if(go){
     go.style.display=P.fresh.length?'':'none';
-    go.textContent='✔ Import '+P.fresh.length+' new entr'+(P.fresh.length===1?'y':'ies');
-    go.onclick=function(){
+    go.textContent=(ST_IMP.mode==='replace')
+      ? ('\u267b Replace with '+P.fresh.length+' entr'+(P.fresh.length===1?'y':'ies'))
+      : ('\u2714 Import '+P.fresh.length+' new entr'+(P.fresh.length===1?'y':'ies'));
+    go.onclick=async function(){
+      if(ST_IMP.mode==='replace'){
+        var had=(storeState().out||[]).length;
+        if(!(await uiConfirm('Replace all of Material Out?\n\n'+had+' entry(ies) are taken out and '+P.fresh.length+
+          ' line(s) from this sheet put in their place.\n\nThe old entries are kept aside — one click undoes this.','Replace all')))return;
+      }
       var n=stImpApply(P.fresh);
       ov.remove();
-      toast('✔ '+n+' issue line(s) added to Material Out'+(P.dup.length?(' · '+P.dup.length+' were already there'):'')+'.');
+      toast((ST_IMP.mode==='replace')
+        ? ('\u267b Material Out replaced — '+n+' entry(ies) loaded. The old ones are kept aside.')
+        : ('\u2714 '+n+' issue line(s) added to Material Out'+(P.dup.length?(' · '+P.dup.length+' were already there'):'')+'.'));
     };
   }
+  ov.querySelectorAll('.st-imp-mode').forEach(function(b){
+    b.onclick=function(){ ST_IMP.mode=b.dataset.m; stImpPaint(ov); };
+  });
   ov.querySelectorAll('.st-imp-sub').forEach(function(b){
     b.onclick=function(){
       var s=b.dataset.s, i=ST_IMP.pick.indexOf(s);
@@ -18375,7 +18526,23 @@ async function stImportIssue(file){
   try{ rows=await stReadIssueSheet(file); }
   catch(e){ toast('⚠ Could not read this sheet — it needs an Item and a Quantity column (the Excel reader also needs internet).'); return; }
   if(!rows.length){ toast('No issue lines found in that sheet.'); return; }
+  /* this store belongs to one project — another project's issuance sheet is refused */
+  var fgn=stForeignInfo(rows);
+  if(fgn.bad.length){
+    var mine=rows.filter(function(r){ return fgn.bad.indexOf(r)<0; });
+    if(!mine.length){
+      var msg='This sheet is not for '+(((typeof PROJ!=='undefined'&&PROJ)?PROJ.name:'this project'))+
+              ' — all '+rows.length+' line(s) were issued against '+fgn.names.join(' · ')+
+              '. Open that project and import the sheet there.';
+      toast('⛔ '+msg);
+      try{ if(typeof uiAlert==='function')await uiAlert('\u26d4  '+msg); }catch(e){}
+      return;
+    }
+    rows=mine;
+  }
   ST_IMP.rows=rows;
+  ST_IMP.mode='add';
+  ST_IMP.refused=fgn;
   ST_IMP.subs=[...new Set(rows.map(function(r){ return r.issSub||r.reqSub||'—'; }).filter(Boolean))].sort();
   ST_IMP.pick=[];
   var ov=mrOverlay('stImpOv','⬆ Import Store Issuance','<div id="stImpBody"></div>',
@@ -18460,7 +18627,67 @@ function stRenderReg(kind){
     '<td style="text-align:right;font-weight:800;background:#f2f5f8;font-variant-numeric:tabular-nums">'+stQty(tot)+'</td>'+
     '<td colspan="4" style="background:#f2f5f8"></td>';
   tb.appendChild(trT);
+  try{ stForeignBanner(kind); }catch(e){}
+  try{
+    var anc=$( kind==='in' ? 'siTable' : 'soTable' );
+    if(anc){ rplBanner('store.'+kind,anc.parentNode,function(){ stRenderReg(kind); });
+             rplBanner('store.all',anc.parentNode,function(){ stRenderReg(kind); }); }
+  }catch(e){}
 }
+/* anything already in the register that belongs to another project */
+function stForeignBanner(kind){
+  var tbl=$( kind==='in' ? 'siTable' : 'soTable' ); if(!tbl)return;
+  var wrap=tbl.parentNode, id='stFgn_'+kind, host=document.getElementById(id);
+  var list=(kind==='in')?storeState().in:storeState().out;
+  var fi=stForeignInfo(list);
+  if(!fi.bad.length){ if(host)host.remove(); return; }
+  if(!host){ host=document.createElement('div'); host.id=id;
+    try{ wrap.parentNode.insertBefore(host,wrap); }catch(e){ return; } }
+  host.style.cssText='background:#fdecea;border:1px solid #f0c9c2;border-left:5px solid #b3392f;color:#8a2c24;'+
+    'border-radius:10px;padding:10px 14px;margin:12px 0 0;font-size:.8rem;line-height:1.6;'+
+    'display:flex;gap:12px;align-items:center;flex-wrap:wrap';
+  host.innerHTML='<div style="flex:1;min-width:260px"><b>&#9940; '+fi.bad.length+' entr'+(fi.bad.length===1?'y':'ies')+
+      ' here belong to another project</b> — '+esc(fi.names.join(' · '))+
+      '. This store is for <b>'+esc((typeof PROJ!=='undefined'&&PROJ&&PROJ.name)||'this project')+'</b> only.</div>'+
+    '<button type="button" class="ghost viewer-hide" style="padding:5px 13px;font-size:.76rem;font-weight:700;border-color:#b3392f;color:#8a2c24">Move them out</button>';
+  host.querySelector('button').onclick=async function(){
+    if(typeof roBlock==='function'&&roBlock())return;
+    if(typeof lkBlock==='function'&&lkBlock(kind==='in'?'storein':'storeout'))return;
+    if(!(await uiConfirm('Move '+fi.bad.length+' entry(ies) out of this store?\n\n'+
+        'They were issued against '+fi.names.join(' · ')+', so they belong to that project. '+
+        'They are kept aside — not deleted — and stop counting in this project\u2019s stock.','Move out')))return;
+    var st=storeState(); st.other=st.other||{};
+    fi.bad.forEach(function(r){
+      var o=stSubOwner(stRowSub(r))||'unknown';
+      st.other[o]=st.other[o]||{in:[],out:[]};
+      st.other[o][kind].push(r);
+    });
+    if(kind==='in')st.in=st.in.filter(function(r){ return fi.bad.indexOf(r)<0; });
+    else st.out=st.out.filter(function(r){ return fi.bad.indexOf(r)<0; });
+    save(true); stRenderReg(kind);
+    toast('\u2714 '+fi.bad.length+' entry(ies) moved out of this store.');
+  };
+}
+/* empty this project's whole store — items, Material In and Material Out — keeping
+   a copy aside so the yellow strip can put it all back */
+async function stReplaceAllStore(){
+  if(typeof roBlock==='function'&&roBlock())return;
+  if(typeof lkBlock==='function'&&(lkBlock('storein')||lkBlock('storeout')))return;
+  var st=storeState();
+  var n=(st.items||[]).length+(st.in||[]).length+(st.out||[]).length;
+  if(!n){ toast('The store is already empty.'); return; }
+  if(typeof requireDelPass==='function' && !(await requireDelPass('Enter ADMIN password to replace the whole store:')))return;
+  if(!(await uiConfirm('Empty this project\u2019s whole store?\n\n'+
+      (st.items||[]).length+' item(s) · '+(st.in||[]).length+' Material In · '+(st.out||[]).length+' Material Out\n\n'+
+      'Everything is kept aside — one click puts it back. Import the fresh data afterwards from Material In / Material Out.','Empty the store')))return;
+  rplSnap('store.all',{items:(st.items||[]).slice(),in:(st.in||[]).slice(),out:(st.out||[]).slice()},'whole store replaced');
+  st.items=[]; st.in=[]; st.out=[];
+  save(true);
+  try{ renderStore(); }catch(e){}
+  try{ renderStoreIn(); renderStoreOut(); }catch(e){}
+  toast('\u267b Store emptied — '+n+' record(s) kept aside. Import the new data now.');
+}
+if($('stAllRep'))$('stAllRep').onclick=stReplaceAllStore;
 function renderStoreIn(){ stRenderReg('in'); }
 function renderStoreOut(){ stRenderReg('out'); }
 /* ---------- print / csv ---------- */
@@ -19659,6 +19886,10 @@ function sgItems(rows){
     it.issued=issued;
     it.bal=it.qty-issued;
     it.rate=it.qty?it.value/it.qty:0;
+    /* the money side of the same two columns — issued at the average GRN rate, and
+       whatever value is still lying in the store */
+    it.issuedVal=issued*it.rate;
+    it.balVal=it.value-it.issuedVal;
     it.vendors=Object.keys(it.vend).sort();
     it.whs=Object.keys(it.wh).sort();
     it.grnN=Object.keys(it.grns).length;
@@ -19679,6 +19910,8 @@ function renderStGRN(){
   var totV=rows.reduce(function(a,g){ return a+g.value; },0);
   var totIss=items.reduce(function(a,i){ return a+i.issued; },0);
   var totBal=items.reduce(function(a,i){ return a+i.bal; },0);
+  var totIssV=items.reduce(function(a,i){ return a+i.issuedVal; },0);
+  var totBalV=items.reduce(function(a,i){ return a+i.balVal; },0);
   if($('sgPill'))$('sgPill').textContent=(SG_VIEW==='item')
     ? (items.length+' item'+(items.length===1?'':'s')+' · '+woMoney(totV))
     : (rows.length+' GRN line'+(rows.length===1?'':'s')+' · '+woMoney(totV));
@@ -19694,8 +19927,8 @@ function renderStGRN(){
     tile('Items',items.length)+
     tile('Received Qty',stQty(totQ),'#1d7fa8')+
     tile('Received Value',woMoney(totV),'var(--navy)')+
-    tile('Issued from Store',stQty(totIss),'#c98a1b')+
-    tile('Balance in Hand',stQty(totBal),totBal>=0?'var(--good)':'var(--bad)','as per GRN − issued')+
+    tile('Issued from Store',stQty(totIss),'#c98a1b','Value '+woMoney(totIssV))+
+    tile('Balance in Hand',stQty(totBal),totBal>=0?'var(--good)':'var(--bad)','Value '+woMoney(totBalV)+' · as per GRN − issued')+
     tile('Last GRN',last?woFmtDate(last):'—','var(--muted)');
   if(!rows.length){ box.innerHTML='<div class="dash-empty">No GRN matches these filters — GRN data comes from <b>Procurement → GRN</b>.</div>'; return; }
   var th=function(t,al,w){ return '<th style="text-align:'+(al||'left')+';padding:6px 8px;font-size:.78rem;color:#8494a4;border-bottom:1px solid #e3eaf1;white-space:nowrap'+(w?(';width:'+w+'px'):'')+'">'+t+'</th>'; };
@@ -19705,7 +19938,8 @@ function renderStGRN(){
       '<table style="width:100%;border-collapse:collapse"><thead><tr>'+
         th('#','center',34)+th('Item Name')+th('Group','left',130)+th('Unit','center',80)+
         th('GRN Qty Received','right',130)+th('Avg Rate','right',110)+th('Received Value','right',130)+
-        th('Issued from Store','right',130)+th('Balance in Hand','right',130)+
+        th('Issued from Store','right',130)+th('Issued Value','right',135)+
+        th('Balance in Hand','right',130)+th('Balance Value','right',140)+
         th('GRNs','center',70)+th('Vendor / Supplier')+th('Last GRN','left',110)+
       '</tr></thead><tbody>'+
       items.map(function(it,i){
@@ -19717,7 +19951,9 @@ function renderStGRN(){
           '<td style="'+td+';text-align:right;font-variant-numeric:tabular-nums">'+woMoney(it.rate)+'</td>'+
           '<td style="'+td+';text-align:right;font-variant-numeric:tabular-nums;font-weight:700">'+woMoney(it.value)+'</td>'+
           '<td style="'+td+';text-align:right;font-variant-numeric:tabular-nums;color:'+(it.issued>0?'#c98a1b':'var(--faint)')+'">'+(it.issued>0?stQty(it.issued):'—')+'</td>'+
+          '<td style="'+td+';text-align:right;font-variant-numeric:tabular-nums;font-weight:700;color:'+(it.issuedVal>0?'#c98a1b':'var(--faint)')+'">'+(it.issuedVal>0?woMoney(it.issuedVal):'—')+'</td>'+
           '<td style="'+td+';text-align:right;font-variant-numeric:tabular-nums;font-weight:800;color:'+(it.bal>=0?'var(--good)':'var(--bad)')+'">'+stQty(it.bal)+'</td>'+
+          '<td style="'+td+';text-align:right;font-variant-numeric:tabular-nums;font-weight:800;color:'+(it.balVal>=0?'var(--good)':'var(--bad)')+'">'+woMoney(it.balVal)+'</td>'+
           '<td style="'+td+';text-align:center;color:var(--muted)">'+it.grnN+'</td>'+
           '<td style="'+td+';font-size:.78rem;color:var(--muted)">'+esc(it.vendors.join(', '))+'</td>'+
           '<td style="'+td+';white-space:nowrap;font-size:.8rem">'+(it.last?woFmtDate(it.last):'—')+'</td></tr>';
@@ -19726,7 +19962,9 @@ function renderStGRN(){
         '<td style="'+td+';text-align:right;font-variant-numeric:tabular-nums">'+stQty(totQ)+'</td><td style="'+td+'"></td>'+
         '<td style="'+td+';text-align:right;font-variant-numeric:tabular-nums">'+woMoney(totV)+'</td>'+
         '<td style="'+td+';text-align:right;font-variant-numeric:tabular-nums;color:#c98a1b">'+stQty(totIss)+'</td>'+
+        '<td style="'+td+';text-align:right;font-variant-numeric:tabular-nums;color:#c98a1b">'+woMoney(totIssV)+'</td>'+
         '<td style="'+td+';text-align:right;font-variant-numeric:tabular-nums;color:var(--good)">'+stQty(totBal)+'</td>'+
+        '<td style="'+td+';text-align:right;font-variant-numeric:tabular-nums;color:'+(totBalV>=0?'var(--good)':'var(--bad)')+'">'+woMoney(totBalV)+'</td>'+
         '<td style="'+td+'"></td><td style="'+td+'"></td><td style="'+td+'"></td></tr>'+
       '</tbody></table></div>';
     return;
@@ -19778,20 +20016,22 @@ function sgPrintDoc(){
       esc((S.settings&&S.settings.project)||(PROJ&&PROJ.name)||'')+' · as at '+fmtLong(iso(new Date()))+'</div>';
   if(SG_VIEW==='item'){
     h+='<table style="width:100%;border-collapse:collapse"><thead><tr style="background:#eef2f6">'+
-      ['#','Item Name','Group','Unit','GRN Qty Received','Avg Rate','Received Value','Issued from Store','Balance in Hand','GRNs','Vendor / Supplier','Last GRN']
+      ['#','Item Name','Group','Unit','GRN Qty Received','Avg Rate','Received Value','Issued from Store','Issued Value','Balance in Hand','Balance Value','GRNs','Vendor / Supplier','Last GRN']
         .map(function(x){ return '<th style="'+td+';font-weight:800">'+x+'</th>'; }).join('')+'</tr></thead><tbody>';
-    var tq=0,tv=0,ti=0,tb=0;
-    items.forEach(function(it,i){ tq+=it.qty; tv+=it.value; ti+=it.issued; tb+=it.bal;
+    var tq=0,tv=0,ti=0,tb=0,tiv=0,tbv=0;
+    items.forEach(function(it,i){ tq+=it.qty; tv+=it.value; ti+=it.issued; tb+=it.bal; tiv+=it.issuedVal; tbv+=it.balVal;
       h+='<tr><td style="'+td+'">'+(i+1)+'</td><td style="'+td+'">'+esc(it.item)+'</td><td style="'+td+'">'+esc(it.group)+'</td>'+
         '<td style="'+td+';text-align:center">'+esc(it.unit)+'</td><td style="'+td+';text-align:right">'+stQty(it.qty)+'</td>'+
         '<td style="'+td+';text-align:right">'+woMoney(it.rate)+'</td><td style="'+td+';text-align:right">'+woMoney(it.value)+'</td>'+
-        '<td style="'+td+';text-align:right">'+stQty(it.issued)+'</td><td style="'+td+';text-align:right;font-weight:700">'+stQty(it.bal)+'</td>'+
+        '<td style="'+td+';text-align:right">'+stQty(it.issued)+'</td><td style="'+td+';text-align:right">'+woMoney(it.issuedVal)+'</td>'+
+        '<td style="'+td+';text-align:right;font-weight:700">'+stQty(it.bal)+'</td><td style="'+td+';text-align:right;font-weight:700">'+woMoney(it.balVal)+'</td>'+
         '<td style="'+td+';text-align:center">'+it.grnN+'</td><td style="'+td+'">'+esc(it.vendors.join(', '))+'</td>'+
         '<td style="'+td+'">'+(it.last?woFmtDate(it.last):'')+'</td></tr>';
     });
     h+='<tr style="background:#f2f5f8;font-weight:800"><td style="'+td+'" colspan="4">TOTAL</td>'+
       '<td style="'+td+';text-align:right">'+stQty(tq)+'</td><td style="'+td+'"></td><td style="'+td+';text-align:right">'+woMoney(tv)+'</td>'+
-      '<td style="'+td+';text-align:right">'+stQty(ti)+'</td><td style="'+td+';text-align:right">'+stQty(tb)+'</td>'+
+      '<td style="'+td+';text-align:right">'+stQty(ti)+'</td><td style="'+td+';text-align:right">'+woMoney(tiv)+'</td>'+
+      '<td style="'+td+';text-align:right">'+stQty(tb)+'</td><td style="'+td+';text-align:right">'+woMoney(tbv)+'</td>'+
       '<td style="'+td+'"></td><td style="'+td+'"></td><td style="'+td+'"></td></tr></tbody></table>';
   }else{
     h+='<table style="width:100%;border-collapse:collapse"><thead><tr style="background:#eef2f6">'+
@@ -19817,8 +20057,8 @@ function sgCsvOut(){
   var e2=function(v){ v=String(v==null?'':v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
   var out=[];
   if(SG_VIEW==='item'){
-    out.push(['Item Name','Group','Unit','GRN Qty Received','Avg Rate','Received Value','Issued from Store','Balance in Hand','GRNs','Vendor / Supplier','Warehouse','Last GRN'].map(e2).join(','));
-    items.forEach(function(it){ out.push([it.item,it.group,it.unit,it.qty,it.rate,it.value,it.issued,it.bal,it.grnN,it.vendors.join(' | '),it.whs.join(' | '),it.last].map(e2).join(',')); });
+    out.push(['Item Name','Group','Unit','GRN Qty Received','Avg Rate','Received Value','Issued from Store','Issued Value','Balance in Hand','Balance Value','GRNs','Vendor / Supplier','Warehouse','Last GRN'].map(e2).join(','));
+    items.forEach(function(it){ out.push([it.item,it.group,it.unit,it.qty,it.rate,it.value,it.issued,it.issuedVal,it.bal,it.balVal,it.grnN,it.vendors.join(' | '),it.whs.join(' | '),it.last].map(e2).join(',')); });
   }else{
     out.push(['GRN No','GRN Date','IGP No','Item Name','Group','Unit','Qty','Rate','Value','Vendor / Supplier','Warehouse','Year','Received By','Status'].map(e2).join(','));
     rows.forEach(function(g){ out.push([g.grn,g.date,g.igp,g.item,g.group,g.unit,g.qty,g.rate,g.value,g.vendor,g.wh,g.year,g.by,g.status].map(e2).join(',')); });
@@ -28302,11 +28542,18 @@ function pcSheetKind(name,head){
   if(has('pono'))return 'igp';
   return '';
 }
-async function procImportFile(f){
+var PC_REPLACE=0;
+async function procImportFile(f,replaceAll){
   await loadXLSX();
   var buf=await f.arrayBuffer();
   var wb=XLSX.read(buf,{type:'array',cellDates:true});
   var P=procState(), added={prdr:0,po:0,igp:0,grn:0};
+  /* Replace all: the four registers are kept aside and emptied before the sheet is read */
+  if(replaceAll){
+    rplSnap('proc',{prdr:(P.prdr||[]).slice(),po:(P.po||[]).slice(),igp:(P.igp||[]).slice(),grn:(P.grn||[]).slice()},
+            'replaced by '+((f&&f.name)||'an Excel file'));
+    P.prdr=[]; P.po=[]; P.igp=[]; P.grn=[];
+  }
   wb.SheetNames.forEach(function(sn){
     var aoa=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,defval:'',raw:false,dateNF:'yyyy-mm-dd'});
     if(!aoa.length)return;
@@ -30519,6 +30766,7 @@ function procFlowHTML(){
 }
 function renderProc(){
   if(!$('pcBody'))return;
+  try{ rplBanner('proc',$('pcBody'),function(){ renderProc(); }); }catch(e){}
   var P=procState();
   /* filter option lists */
   var projs={},groups={},vendors={};
@@ -30658,6 +30906,17 @@ if($('pcClearF'))$('pcClearF').onclick=function(){
 };
 if($('pcImport'))$('pcImport').onclick=async function(){
   if(typeof requireEditPass==='function' && !(await requireEditPass('Enter password to import procurement data:')))return;
+  PC_REPLACE=0;
+  $('pcFile').click();
+};
+if($('pcReplace'))$('pcReplace').onclick=async function(){
+  var P=procState(), had=(P.prdr||[]).length+(P.po||[]).length+(P.igp||[]).length+(P.grn||[]).length;
+  if(!(await uiConfirm('Import an Excel that REPLACES all procurement data?\n\n'+
+      had+' row(s) held now (PR '+(P.prdr||[]).length+' · PO '+(P.po||[]).length+' · IGP '+(P.igp||[]).length+
+      ' · GRN '+(P.grn||[]).length+') are taken out and the sheet loaded in their place.\n\n'+
+      'They are kept aside — one click undoes this.','Choose the file')))return;
+  if(typeof requireDelPass==='function' && !(await requireDelPass('Enter ADMIN password to replace all procurement data:')))return;
+  PC_REPLACE=1;
   $('pcFile').click();
 };
 if($('pcSave'))$('pcSave').onclick=function(){
@@ -30669,9 +30928,11 @@ if($('pcSave'))$('pcSave').onclick=function(){
   toast('💾 Procurement data saved — PR '+(P.prdr||[]).length+' · PO '+(P.po||[]).length+' · IGP '+(P.igp||[]).length+' · GRN '+(P.grn||[]).length+' rows.');
 };
 if($('pcFile'))$('pcFile').addEventListener('change',async function(e){
-  var f=e.target.files[0]; e.target.value=''; if(!f)return;
+  var f=e.target.files[0]; e.target.value='';
+  var repl=PC_REPLACE; PC_REPLACE=0;               /* the flag is used once, even if the pick is cancelled */
+  if(!f)return;
   toast('Reading '+f.name+' …');
-  try{ await procImportFile(f); }catch(err){ console.warn(err); toast('⚠ Could not read that file — please send the Excel export.'); }
+  try{ await procImportFile(f,repl); }catch(err){ console.warn(err); toast('⚠ Could not read that file — please send the Excel export.'); }
 });
 if($('pcClear'))$('pcClear').onclick=async function(){
   if(typeof requireDelPass==='function' && !(await requireDelPass('Enter ADMIN password to clear all procurement data:')))return;
@@ -35965,9 +36226,10 @@ function mrBackupHTML(){
       '<b>⚕ Restore BOQ only</b> puts a backup\'s BOQ back without touching days, photos or bills. '+
       'Because the old item ids come back with it, every daily progress row that showed '+
       '“(item removed from BOQ)” links up again.<br>'+
-      '<b>Auto-backup every 3 hours</b> drops an all-projects file into Downloads once in every '+
-      'three-hour block — 00, 03, 06, 09, 12, 15, 18, 21 '+
-      '(<code>SiteApp-ALL-&lt;date&gt;-&lt;hh&gt;h.json</code>) — plus one <code>DAILY</code> file a day. '+
+      '<b>Auto-backup every 3 hours</b> drops one all-projects file into Downloads '+
+      '(<code>SiteApp-ALL-&lt;date&gt;-&lt;hh&gt;h&lt;mm&gt;.json</code>) every three hours, counted from the '+
+      'last backup — so two files never land minutes apart. If the app was closed when one was due, '+
+      'it is written the next time you open it. '+
       'It checks the data first — if a project\'s BOQ or days have collapsed it writes nothing and warns you, '+
       'so a broken app can never overwrite a good backup.</p>';
 }
@@ -36338,16 +36600,28 @@ function abSave(o){ try{ localStorage.setItem(AB_KEY,JSON.stringify(o)); }catch(
 function abOn(){ var o=abLoad(); return o.on!==false; }          /* default: chalu */
 function abSetOn(v){ var o=abLoad(); o.on=!!v; abSave(o); }
 function ab2(n){ return (n<10?'0':'')+n; }
-/* A file every hour filled the Downloads folder faster than anyone wanted, so
-   the backup now lands once in every three-hour block — 00, 03, 06, 09, 12, 15,
-   18, 21 — and the file is named after the block it belongs to. The daily file
-   is unchanged. */
+/* A backup is written once THREE FULL HOURS have passed since the last one —
+   counted from the moment that last file was written, not from the wall clock.
+   The old build used clock blocks (00, 03, 06 …), so opening the app a minute
+   before a block changed dropped two files almost together; that cannot happen
+   now. The time of the last backup is kept in localStorage, so closing the app
+   and coming back the next day writes one straight away. Only this one file is
+   written — the separate DAILY copy has been removed. */
 var AB_EVERY=3;                                   /* hours between backups */
+var AB_GAP_MS=AB_EVERY*60*60*1000;
 function abStamp(){
   var d=new Date();
-  var blk=Math.floor(d.getHours()/AB_EVERY)*AB_EVERY;
-  return {day:iso(d), hour:ab2(blk)};
+  return {day:iso(d), hour:ab2(d.getHours()), min:ab2(d.getMinutes())};
 }
+/* is a backup due yet? */
+function abDue(o){
+  var last=+((o||{}).lastAt)||0;
+  if(!last)return true;                            /* nothing written on this device yet */
+  if(last>Date.now()+60000)return true;            /* clock was moved back — do not wait forever */
+  return (Date.now()-last)>=AB_GAP_MS;
+}
+/* when the next one is due — used by the Backups screen */
+function abNextAt(){ var last=+(abLoad().lastAt)||0; return last?(last+AB_GAP_MS):0; }
 
 /* har project ke gine hue numbers — sehat ka paimana */
 function abCounts(){
@@ -36386,15 +36660,16 @@ var _abBusy=false;
 function abTick(){
   if(_abBusy||!abOn())return;
   var st=abStamp(), o=abLoad();
-  /* the old build stamped every hour; anything that is not a block of three is
-     from that build and is simply forgotten */
-  try{
-    var lh=String(o.lastHour||''), hh=+lh.slice(-2);
-    if(lh&&isFinite(hh)&&(hh%AB_EVERY))o.lastHour='';
-  }catch(e){}
-  var needHour=(o.lastHour!==st.day+'-'+st.hour);
-  var needDay =(o.lastDay!==st.day);
-  if(!needHour&&!needDay)return;
+  /* older builds remembered a clock block instead of a time — carry it across once,
+     so the first run after this update does not dump a file immediately */
+  if(!o.lastAt&&o.lastHour){
+    try{
+      var pp=String(o.lastHour).split('-');
+      if(pp.length===4)o.lastAt=new Date(+pp[0],+pp[1]-1,+pp[2],+pp[3],0,0).getTime();
+    }catch(e){}
+    delete o.lastHour; delete o.lastDay; abSave(o);
+  }
+  if(!abDue(o))return;
   /* app abhi theek se khadi hui hai? warna kuch mat likho */
   var now=abCounts(); var anyData=Object.keys(now).some(function(k){ return now[k].days>0; });
   if(!anyData)return;
@@ -36409,9 +36684,8 @@ function abTick(){
     var pack=abBuildPack();
     if(pack){
       var txt=JSON.stringify(pack,null,1);
-      if(needHour){ mrDownload('SiteApp-ALL-'+st.day+'-'+st.hour+'h.json',txt); o.lastHour=st.day+'-'+st.hour; }
-      if(needDay){  mrDownload('SiteApp-ALL-DAILY-'+st.day+'.json',txt);      o.lastDay=st.day; }
-      o.counts=now; abSave(o);
+      mrDownload('SiteApp-ALL-'+st.day+'-'+st.hour+'h'+st.min+'.json',txt);
+      o.lastAt=Date.now(); o.counts=now; abSave(o);
     }
   }catch(e){ console.warn('auto-backup',e); }
   finally{ _abBusy=false; }
@@ -45196,11 +45470,53 @@ storageNote();
     return {rows:rows,unit:u};
   }
 
+  /* =======================  Store — value wise  =======================
+     A store entry carries a quantity, not always a price. The value of a line is
+     taken from the line itself where it has one, otherwise from the average GRN
+     rate of that item — the same rate the "Store As per GRN" sheet shows. */
+  function drpRateMap(){
+    var P={}; try{ P=(typeof procState==='function')?procState():((typeof S!=='undefined'&&S.proc)||{}); }catch(e){}
+    var m={};
+    ((P&&P.grn)||[]).forEach(function(g){
+      var k=String(g.item||'').trim().toLowerCase(); if(!k)return;
+      var q=N(g.qty), v=N(g.value)||q*N(g.rate);
+      if(!m[k])m[k]={q:0,v:0};
+      m[k].q+=q; m[k].v+=v;
+    });
+    var out={};
+    Object.keys(m).forEach(function(k){ out[k]=m[k].q?(m[k].v/m[k].q):0; });
+    return out;
+  }
+  function drpStore(D){
+    var st={};
+    try{ st=(typeof storeState==='function')?storeState():((typeof S!=='undefined'&&S.store)||{}); }catch(e){ st={}; }
+    var rate=drpRateMap();
+    var val=function(r){
+      var v=N(r.value); if(v)return v;
+      var q=N(r.qty), rt=N(r.rate);
+      if(rt)return q*rt;
+      return q*(rate[String(r.item||'').trim().toLowerCase()]||0);
+    };
+    var mk=function(list){
+      var o={tN:0,pN:0,tQ:0,pQ:0,tV:0,pV:0,items:{}};
+      (list||[]).forEach(function(r){
+        var d=dnorm(r.date); if(!d||d>D)return;
+        var q=N(r.qty), v=val(r);
+        if(d<D){ o.pN++; o.pQ+=q; o.pV+=v; } else { o.tN++; o.tQ+=q; o.tV+=v; o.items[String(r.item||'').trim()]=1; }
+      });
+      o.nItemsToday=Object.keys(o.items).length;
+      return o;
+    };
+    var i=mk(st.in), o=mk(st.out);
+    return { inn:i, out:o, recV:i.tV+i.pV, issV:o.tV+o.pV, balV:(i.tV+i.pV)-(o.tV+o.pV),
+             netToday:i.tV-o.tV };
+  }
+
   /* =======================  the whole sheet as one object  ======================= */
   function drpData(){
     var D=drpAsOf();
     var p=drpProc(D);
-    return {D:D, pr:p.pr, po:p.po, wo:drpWO(D), bill:drpBills(D), conc:drpConc(D)};
+    return {D:D, pr:p.pr, po:p.po, wo:drpWO(D), bill:drpBills(D), conc:drpConc(D), store:drpStore(D)};
   }
 
   /* =======================  building the sheet  ======================= */
@@ -45233,6 +45549,7 @@ storageNote();
       '<div class="k"><b>'+Q(d.wo.tNos)+'<small>nos</small></b><i>Work orders today</i></div>'+
       '<div class="k"><b>'+Q(d.bill.tNos)+'<small>nos</small></b><i>Bills today</i></div>'+
       '<div class="k alt"><b>'+Q(concTodayTotal)+'<small>'+X(d.conc.unit)+'</small></b><i>Concrete today</i></div>'+
+      '<div class="k alt"><b>'+M(d.store.out.tV)+'</b><i>Store issued today (value)</i></div>'+
       '</div>';
 
     /* ---- procurement & commercial ---- */
@@ -45256,6 +45573,26 @@ storageNote();
       ['tdy','Generated today',Q(d.bill.tNos),M(d.bill.tAmt)],
       ['','Previous',Q(d.bill.pNos),M(d.bill.pAmt)],
       ['tot','Total (up to now)',Q(d.bill.tNos+d.bill.pNos),M(d.bill.tAmt+d.bill.pAmt)]
+    ]);
+    h+='</div>';
+
+    /* ---- store, in money ---- */
+    var sv=d.store;
+    h+='<div class="drp-sec">Store &mdash; value wise</div><div class="drp-grid">';
+    h+=blk('Material In — received into store','&#128229;','',['Entries','Value'],[
+      ['tdy','Received today',Q(sv.inn.tN),M(sv.inn.tV)],
+      ['','Previous',Q(sv.inn.pN),M(sv.inn.pV)],
+      ['tot','Total (up to now)',Q(sv.inn.tN+sv.inn.pN),M(sv.recV)]
+    ]);
+    h+=blk('Material Out — issued from store','&#128228;','',['Entries','Value'],[
+      ['tdy','Issued today',Q(sv.out.tN),M(sv.out.tV)],
+      ['','Previous',Q(sv.out.pN),M(sv.out.pV)],
+      ['tot','Total (up to now)',Q(sv.out.tN+sv.out.pN),M(sv.issV)]
+    ]);
+    h+=blk('Store balance — value','&#127978;','',['Amount'],[
+      ['','Received up to now',M(sv.recV)],
+      ['','Issued up to now',M(sv.issV)],
+      ['tot','Balance lying in store',M(sv.balV)]
     ]);
     h+='</div>';
 
@@ -45284,7 +45621,7 @@ storageNote();
       h+='</div>';
     }
 
-    h+='<div class="drp-foot"><span>Today = entries dated '+X(D)+'.</span><span>Previous = everything dated before it.</span><span>Total = up to and including this date.</span></div>';
+    h+='<div class="drp-foot"><span>Store value = the line\u2019s own amount where it has one, otherwise qty \u00d7 the average GRN rate of that item.</span><span>Today = entries dated '+X(D)+'.</span><span>Previous = everything dated before it.</span><span>Total = up to and including this date.</span></div>';
     h+='</div>';
     return h;
   }
@@ -45302,6 +45639,11 @@ storageNote();
     row('PO — Nos / Amount',d.po.tNos,d.po.pNos,d.po.nos,d.po.tAmt,d.po.pAmt,d.po.amt);
     row('Work Orders — Nos / Amount',d.wo.tNos,d.wo.pNos,d.wo.tNos+d.wo.pNos,d.wo.tAmt,d.wo.pAmt,d.wo.tAmt+d.wo.pAmt);
     row('Bills — Nos / Amount',d.bill.tNos,d.bill.pNos,d.bill.tNos+d.bill.pNos,d.bill.tAmt,d.bill.pAmt,d.bill.tAmt+d.bill.pAmt);
+    row('');
+    row('Store (value)','Today','Previous','Total','Entries today','Entries previous','Entries total');
+    row('Material In',d.store.inn.tV,d.store.inn.pV,d.store.recV,d.store.inn.tN,d.store.inn.pN,d.store.inn.tN+d.store.inn.pN);
+    row('Material Out (issued)',d.store.out.tV,d.store.out.pV,d.store.issV,d.store.out.tN,d.store.out.pN,d.store.out.tN+d.store.out.pN);
+    row('Balance lying in store','','',d.store.balV);
     row('');
     row('Concrete ('+d.conc.unit+')','Poured today','Previous','Total','Trips today','Trips previous','Trips total');
     d.conc.rows.forEach(function(r){ row(r.mix,r.tQty,r.pQty,r.tQty+r.pQty,r.tTrips,r.pTrips,r.tTrips+r.pTrips); });
