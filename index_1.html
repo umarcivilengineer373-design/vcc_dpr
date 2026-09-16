@@ -6042,6 +6042,9 @@ input.bd-drop{appearance:none;-webkit-appearance:none;cursor:text;padding-right:
   <div class="card" bis_skin_checked="1">
     <div class="card-h" bis_skin_checked="1"><h2>Concrete Record — <span id="concDateLabel">Tue, 15 Sept 2026</span></h2><span class="hint">pours on this day</span>
       <span class="spacer"></span>
+      <input type="file" id="concImpFile" accept=".xlsx,.xls,.csv" style="display:none">
+      <button class="ghost" id="concImport" style="padding:5px 12px;font-size:.78rem;border-color:#1f8f4e;color:#1f8f4e" title="Read an Excel of earlier ready-mix pours — every line lands on its own date">⬆ Import Excel</button>
+      <button class="ghost" id="concFormat" style="padding:5px 12px;font-size:.78rem" title="Download the blank format to fill">⬇ Format</button>
       <button class="ghost" id="printConc" style="padding:5px 12px;font-size:.78rem">🖨 Print</button>
       <button class="ghost" id="concEditBtn" style="padding:5px 12px;font-size:.78rem">🔓 Edit (Admin)</button>
       <button class="ghost" id="delConc" style="padding:5px 12px;font-size:.78rem;color:var(--bad);border-color:#e3bcb7">🗑 Delete</button><button class="primary" id="editConc" style="padding:6px 16px;background:var(--navy2)">✎ Edit</button><button class="primary" id="addConc" style="padding:6px 16px">+ New</button><button class="primary" id="saveConc" style="padding:6px 16px;background:var(--good)">💾 SAVE</button></div>
@@ -10287,7 +10290,7 @@ The Vertical" required=""></textarea>
     <div class="card-h" bis_skin_checked="1"><h2>Store Stock Summary</h2><span class="hint">builds itself from the Material In / Material Out entries</span>
       <span class="spacer"></span>
       <div class="field" style="min-width:150px;margin:0" bis_skin_checked="1"><label>As at date</label><input type="date" id="stDate"></div>
-      <button class="ghost viewer-hide" id="stAllRep" style="padding:5px 12px;font-size:.78rem;border-color:#b7952a;color:#8a6d1a" title="Empty this project's whole store — items, Material In and Material Out — keeping the old data aside so it can be undone">♻ Replace all store data</button>
+      <button class="ghost" id="stAllRep" style="padding:5px 12px;font-size:.78rem;border-color:#b7952a;color:#8a6d1a" title="Empty this project's whole store — items, Material In and Material Out — keeping the old data aside so it can be undone">♻ Replace all store data</button>
       <button class="ghost" id="stPrint" style="padding:5px 12px;font-size:.78rem">🖨 Print</button>
       <button class="ghost" id="stCsv" style="padding:5px 12px;font-size:.78rem">⬇ Export CSV</button>
       <span class="pill total" id="stPill">85 items</span>
@@ -10323,7 +10326,7 @@ The Vertical" required=""></textarea>
       <span class="spacer"></span>
       <button class="primary" id="siAdd" style="padding: 6px 14px;">+ Add Entry</button>
       <button class="ghost" id="siFromGrn" style="padding: 5px 12px; font-size: 0.78rem; border-color: rgb(31, 143, 78); color: rgb(31, 143, 78);" title="Bring every GRN receipt from Procurement into the store as Material In">⬇ Import from GRN</button>
-      <button class="ghost viewer-hide" id="siGrnRep" style="padding:5px 12px;font-size:.78rem;border-color:#b7952a;color:#8a6d1a" title="Empty Material In and bring every GRN receipt in again — the old entries are kept aside, so this can be undone">♻ Replace all from GRN</button>
+      <button class="ghost" id="siGrnRep" style="padding:5px 12px;font-size:.78rem;border-color:#b7952a;color:#8a6d1a" title="Empty Material In and bring every GRN receipt in again — the old entries are kept aside, so this can be undone">♻ Replace all from GRN</button>
       <button class="ghost" id="siPrint" style="padding:5px 12px;font-size:.78rem">🖨 Print</button>
       <button class="ghost" id="siCsv" style="padding:5px 12px;font-size:.78rem">⬇ Export CSV</button>
       <span class="pill total" id="siPill">0</span>
@@ -18189,7 +18192,12 @@ function rplDrop(key){ try{ if(S._undo)delete S._undo[key]; }catch(e){} }
 function rplCount(u){
   if(!u||!u.data)return 0;
   if(Array.isArray(u.data))return u.data.length;
-  return ['items','in','out','prdr','po','igp','grn'].reduce(function(a,k){ return a+((u.data[k]||[]).length); },0);
+  var known=['items','in','out','prdr','po','igp','grn'];
+  var n=known.reduce(function(a,k){ return a+((u.data[k]||[]).length); },0);
+  if(n)return n;
+  /* a snapshot kept date by date (the concrete register) */
+  try{ Object.keys(u.data).forEach(function(k){ if(Array.isArray(u.data[k]))n+=u.data[k].length; }); }catch(e){}
+  return n;
 }
 function rplApply(key){
   var u=rplGet(key); if(!u||!u.data)return false;
@@ -18198,6 +18206,10 @@ function rplApply(key){
   else if(key==='store.in'){ storeState().in=d; }
   else if(key==='store.all'){ var st=storeState(); st.items=d.items||[]; st.in=d.in||[]; st.out=d.out||[]; }
   else if(key==='proc'){ var P=procState(); ['prdr','po','igp','grn'].forEach(function(k){ P[k]=d[k]||[]; }); }
+  else if(key==='conc'){
+    Object.keys(S.days||{}).forEach(function(dt){ if(S.days[dt])S.days[dt].concrete=[]; });
+    Object.keys(d||{}).forEach(function(dt){ try{ day(dt).concrete=d[dt]||[]; }catch(e){} });
+  }
   else return false;
   rplDrop(key); save(true); return true;
 }
@@ -18216,8 +18228,8 @@ function rplBanner(key,beforeEl,after){
   host.innerHTML='<div style="flex:1;min-width:250px"><b>&#9851; '+esc(RPL_LABEL[key]||key)+' was replaced</b> — '+
       n+' earlier entr'+(n===1?'y is':'ies are')+' still kept aside'+(u.by?(' · by '+esc(u.by)):'')+
       (u.at?(' · '+esc(rplWhen(u.at))):'')+'.</div>'+
-    '<button type="button" class="ghost viewer-hide" data-a="undo" style="padding:5px 13px;font-size:.76rem;font-weight:700;border-color:#b7952a;color:#8a6d1a">&#8617; Undo — put them back</button>'+
-    '<button type="button" class="ghost viewer-hide" data-a="ok" style="padding:5px 11px;font-size:.74rem">&#10003; Keep the new data</button>';
+    '<button type="button" class="ghost" data-a="undo" style="padding:5px 13px;font-size:.76rem;font-weight:700;border-color:#b7952a;color:#8a6d1a">&#8617; Undo — put them back</button>'+
+    '<button type="button" class="ghost" data-a="ok" style="padding:5px 11px;font-size:.74rem">&#10003; Keep the new data</button>';
   host.querySelector('[data-a="undo"]').onclick=async function(){
     if(typeof roBlock==='function'&&roBlock())return;
     if(!(await uiConfirm('Put the earlier '+n+' entry(ies) back?\n\nWhatever replaced them is dropped.','Undo')))return;
@@ -18733,7 +18745,7 @@ function stForeignBanner(kind){
   host.innerHTML='<div style="flex:1;min-width:260px"><b>&#9940; '+fi.bad.length+' entr'+(fi.bad.length===1?'y':'ies')+
       ' here belong to another project</b> — '+esc(fi.names.join(' · '))+
       '. This store is for <b>'+esc((typeof PROJ!=='undefined'&&PROJ&&PROJ.name)||'this project')+'</b> only.</div>'+
-    '<button type="button" class="ghost viewer-hide" style="padding:5px 13px;font-size:.76rem;font-weight:700;border-color:#b3392f;color:#8a2c24">Move them out</button>';
+    '<button type="button" class="ghost" style="padding:5px 13px;font-size:.76rem;font-weight:700;border-color:#b3392f;color:#8a2c24">Move them out</button>';
   host.querySelector('button').onclick=async function(){
     if(typeof roBlock==='function'&&roBlock())return;
     if(typeof lkBlock==='function'&&lkBlock(kind==='in'?'storein':'storeout'))return;
@@ -23179,6 +23191,7 @@ $('cmSave').onclick=()=>{
 };
 function renderConc(){
   $('concDateLabel').textContent=fmtMed(curDate);
+  try{ if(window.concImportWire)concImportWire(); if(window.concUndoBanner)concUndoBanner(); }catch(e){}
   const tb=$('concTable').tBodies[0];tb.innerHTML='';
   const list=day(curDate).concrete;
   if(!list.length){tb.innerHTML='<tr><td colspan="11" style="color:var(--faint);padding:10px;font-size:.83rem">No concrete poured on this day — click “+ Add pour” if there was.</td></tr>';return}
@@ -45409,6 +45422,371 @@ storageNote();
 
 
 
+
+
+<script>
+/* ==========================================================================
+   CONCRETE (READY MIX) — bulk import of earlier pours, date wise
+   The site keeps its old ready-mix record in Excel: one line per trip, with the
+   date on the line. That sheet is read straight in here — every line becomes a
+   pour on its own date, so months of history land in one go instead of being
+   typed day by day. A line already in the register (same date, mix, TM, slip and
+   quantity) is recognised and left alone, so importing the same sheet twice does
+   not double the record.
+   ========================================================================== */
+(function(){
+  function E(id){ return document.getElementById(id); }
+  function X(v){ return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function NUM(v){ var n=parseFloat(String(v==null?'':v).replace(/,/g,'')); return isFinite(n)?n:0; }
+  function S2(v){ return String(v==null?'':v).trim(); }
+
+  /* the columns the sheet may carry — spelling does not have to match exactly */
+  var CI_COLS=[
+    {k:'sno',  t:'S.#',               names:['s','sno','s#','srno','sr','serial','serialno','no']},
+    {k:'proj', t:'Project',           names:['project','projectname','subsegment','subsegmentname']},
+    {k:'date', t:'Date',              names:['date','pourdate','castingdate','trandate']},
+    {k:'item', t:'Item / Work',       names:['itemwork','item','itemname','work','workitem','itemdescription','description']},
+    {k:'mix',  t:'Design Mix',        names:['designmix','mix','grade','concretegrade','designmixgrade']},
+    {k:'floor',t:'Floor',             names:['floor','floorsection','level','section']},
+    {k:'seg',  t:'Segment',           names:['segment','area','zone']},
+    {k:'ven',  t:'Supplier / Vendor', names:['suppliervendor','supplier','vendor','plant','supplierplant','batchingplant']},
+    {k:'tm',   t:'TM #',              names:['tm','tmno','tm#','truck','truckno','transitmixer','tmnumber']},
+    {k:'slip', t:'Slip #',            names:['slip','slipno','slip#','dono','deliveryslip','challan','challanno']},
+    {k:'time', t:'Time Received',     names:['timereceived','time','receivedtime','arrivaltime','timein']},
+    {k:'unit', t:'Unit',              names:['unit','uom']},
+    {k:'qty',  t:'Quantity',          names:['quantity','qty','volume','m3','cum','cubicmeter']}
+  ];
+
+  function ciNorm(s){ return String(s==null?'':s).toLowerCase().replace(/[^a-z0-9]/g,''); }
+
+  /* every date shape the sheet may use — 17-Feb-25, 17/02/2025, a real Excel date … */
+  function ciDate(v){
+    if(v==null||v==='')return '';
+    if(v instanceof Date&&!isNaN(v))return iso(v);
+    var s=String(v).trim();
+    if(/^\d{4}-\d{2}-\d{2}/.test(s))return s.slice(0,10);
+    var M={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+    var m=s.match(/^(\d{1,2})[-\/\s]([A-Za-z]{3,})[-\/\s](\d{2,4})$/);
+    if(m){
+      var mo=M[m[2].slice(0,3).toLowerCase()];
+      if(mo){ var y=+m[3]; if(y<100)y+=2000;
+        return y+'-'+String(mo).padStart(2,'0')+'-'+String(+m[1]).padStart(2,'0'); }
+    }
+    m=s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{2,4})$/);      /* d-m-y, the local order */
+    if(m){ var y2=+m[3]; if(y2<100)y2+=2000;
+      return y2+'-'+String(+m[2]).padStart(2,'0')+'-'+String(+m[1]).padStart(2,'0'); }
+    if(/^\d{5}$/.test(s)){                                      /* an Excel serial number */
+      var d0=new Date(Date.UTC(1899,11,30)+(+s)*86400000);
+      if(!isNaN(d0))return iso(new Date(d0.getUTCFullYear(),d0.getUTCMonth(),d0.getUTCDate()));
+    }
+    var t=Date.parse(s); if(!isNaN(t))return iso(new Date(t));
+    return '';
+  }
+
+  /* "CONCRETE 4000 PSI" -> "4000 Psi", so it reads like the rest of the app */
+  function ciMix(v){
+    var s=S2(v); if(!s)return '';
+    var m=s.match(/(\d[\d,\.]*)\s*psi/i);
+    return m ? (m[1].replace(/,/g,'')+' Psi') : s;
+  }
+  /* the BOQ line this pour belongs to — matched on the grade, then the floor */
+  function ciItem(mix,floor,seg){
+    var ps=String(mix||'').replace(/[^0-9]/g,'');
+    if(!ps)return '';
+    var list=(S.boq||[]).filter(function(b){
+      return String(b.name||'').replace(/[^0-9]/g,'').indexOf(ps)>=0 && /psi|concrete|rcc|pcc/i.test(b.name||'');
+    });
+    if(!list.length)return '';
+    var f=S2(floor).toLowerCase(), g=S2(seg).toLowerCase();
+    var hit=list.filter(function(b){ var bf=String(b.floor||'').toLowerCase();
+      return f&&bf&&(bf===f||bf.indexOf(f)>=0||f.indexOf(bf)>=0); });
+    if(!hit.length&&g)hit=list.filter(function(b){ var bs=String(b.sub||'').toLowerCase();
+      return bs&&(bs===g||bs.indexOf(g)>=0||g.indexOf(bs)>=0); });
+    return (hit[0]||list[0]).name;
+  }
+  function ciUnit(v,item){
+    var s=S2(v);
+    if(!s){ var b=(S.boq||[]).filter(function(x){ return x.name===item; })[0]; s=b?S2(b.unit):''; }
+    if(/^m3$|^cum$|^cu\.?\s*m(tr|t|eter)?s?\.?$|cubic/i.test(s))return 'Cubic meter-M3';
+    return s||'Cubic meter-M3';
+  }
+  /* one pour, identified by what it says — used to spot a line already in */
+  function ciKey(r){
+    return [r.date, ciMix(r.mix), S2(r.tm), S2(r.slip), String(NUM(r.qty))].join('|').toLowerCase();
+  }
+  /* HOW MANY of each line the register already holds. A ready-mix sheet carries the
+     same line several times over — six trips of 3.75 m3 on the same TM, same day — and
+     every one of those is a real delivery. So the count is compared, not just the key:
+     five identical lines in the sheet against two already recorded means three are new. */
+  function ciHave(){
+    var have={};
+    Object.keys(S.days||{}).forEach(function(d){
+      ((S.days[d]||{}).concrete||[]).forEach(function(c){
+        var k=[d, ciMix(c.mix), S2(c.tm), S2(c.slip), String(NUM(c.qty))].join('|').toLowerCase();
+        have[k]=(have[k]||0)+1;
+      });
+    });
+    return have;
+  }
+
+  /* ---------------- reading the sheet ---------------- */
+  async function ciRead(file){
+    await loadXLSX();
+    var buf=await file.arrayBuffer();
+    var wb=XLSX.read(buf,{type:'array',cellDates:true});
+    var best=null;
+    wb.SheetNames.forEach(function(sn){
+      var aoa=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,defval:'',raw:false,dateNF:'yyyy-mm-dd'});
+      for(var i=0;i<Math.min(aoa.length,12);i++){
+        var head=(aoa[i]||[]).map(ciNorm);
+        var hasQty=head.some(function(h){ return h==='quantity'||h==='qty'||h==='volume'; });
+        var hasDate=head.some(function(h){ return h==='date'||h==='pourdate'||h==='castingdate'; });
+        if(hasQty&&hasDate){ best={aoa:aoa,hi:i,sheet:sn}; break; }
+      }
+      if(best)return;
+    });
+    if(!best)throw new Error('no sheet');
+    var H=(best.aoa[best.hi]||[]).map(ciNorm), ix={};
+    CI_COLS.forEach(function(c){
+      ix[c.k]=-1;
+      for(var i=0;i<c.names.length;i++){ var k=H.indexOf(c.names[i]); if(k>=0){ ix[c.k]=k; break; } }
+    });
+    var out=[], skipped=0;
+    for(var r=best.hi+1;r<best.aoa.length;r++){
+      var row=best.aoa[r]||[];
+      var g=function(k){ return ix[k]>=0?row[ix[k]]:''; };
+      var qty=NUM(g('qty')), dt=ciDate(g('date'));
+      if(!qty&&!S2(g('mix'))&&!dt)continue;                   /* a blank line */
+      if(/^(total|grand total|sub total|subtotal)$/i.test(S2(g('mix'))||S2(g('floor'))))continue;
+      if(!dt||!qty){ skipped++; continue; }
+      out.push({ proj:S2(g('proj')), date:dt, item:S2(g('item')), mix:S2(g('mix')), floor:S2(g('floor')),
+                 seg:S2(g('seg')), ven:S2(g('ven')), tm:S2(g('tm')), slip:S2(g('slip')),
+                 time:S2(g('time')), unit:S2(g('unit')), qty:qty });
+    }
+    return {rows:out, skipped:skipped, sheet:best.sheet};
+  }
+
+  /* ---------------- the preview dialog ---------------- */
+  var CI={rows:[],skip:0,mode:'add',refused:null,sheet:''};
+
+  function ciSplit(){
+    var have=ciHave(), seen={}, fresh=[], dup=[];
+    CI.rows.forEach(function(r){
+      if(CI.mode==='replace'){ fresh.push(r); return; }
+      var k=ciKey(r);
+      seen[k]=(seen[k]||0)+1;
+      if(seen[k]<=(have[k]||0))dup.push(r); else fresh.push(r);
+    });
+    return {fresh:fresh,dup:dup};
+  }
+
+  function ciPanel(){
+    var sp=ciSplit(), rows=CI.rows;
+    var mixes={}, dates=[], q=0;
+    rows.forEach(function(r){ mixes[ciMix(r.mix)||'—']=1; dates.push(r.date); q+=r.qty; });
+    dates.sort();
+    var tile=function(l,v,c){ return '<div style="flex:1;min-width:116px;background:#f8fafc;border:1px solid var(--border);border-radius:9px;padding:8px 12px">'+
+      '<div style="font-size:.66rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">'+l+'</div>'+
+      '<div style="font-size:1rem;font-weight:800;color:'+(c||'var(--navy)')+';font-variant-numeric:tabular-nums">'+v+'</div></div>'; };
+    var chip=function(m,t,d){
+      var on=(CI.mode===m);
+      return '<button type="button" class="ghost ci-mode" data-m="'+m+'" style="padding:6px 13px;font-size:.78rem;font-weight:700;text-align:left;'+
+        (on?(m==='replace'?'background:#b3392f;color:#fff;border-color:#b3392f':'background:var(--navy);color:#fff;border-color:var(--navy)'):'')+'">'+
+        t+'<div style="font-size:.68rem;font-weight:600;opacity:.85">'+d+'</div></button>';
+    };
+    var h='';
+    if(CI.refused&&CI.refused.length)
+      h+='<div style="background:#fdecea;border:1px solid #f0c9c2;border-left:5px solid #b3392f;color:#8a2c24;border-radius:9px;padding:9px 12px;font-size:.78rem;line-height:1.6;margin-bottom:11px">'+
+         '<b>&#9940; '+CI.refused.length+' line(s) were refused</b> — their Project column belongs to another project. '+
+         'Only this project&rsquo;s pours can come in here.</div>';
+    h+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:11px">'+
+        chip('add','&#10133; Add new only','keeps every pour already recorded')+
+        chip('replace','&#9851; Replace all pours','clears every recorded pour first, then loads this sheet')+
+      '</div>';
+    if(CI.mode==='replace')
+      h+='<div style="background:#fdf3e2;border:1px solid #e6c98a;border-left:5px solid #c98a1b;color:#8a6d1a;border-radius:9px;padding:9px 12px;font-size:.78rem;line-height:1.6;margin-bottom:11px">'+
+         '<b>&#9851; Replace all</b> — every concrete pour on every date is taken out and this sheet put in its place. '+
+         'They are <b>kept aside</b>, so one click can undo it.</div>';
+    h+='<div style="font-size:.78rem;color:#5b6b7b;line-height:1.6;margin-bottom:10px">Read <b>'+rows.length+
+       '</b> pour line(s) from <b>'+X(CI.sheet)+'</b>'+
+       (dates.length?(' · <b>'+woFmtDate(dates[0])+'</b> to <b>'+woFmtDate(dates[dates.length-1])+'</b>'):'')+'.</div>';
+    h+='<div style="display:flex;gap:9px;flex-wrap:wrap;margin-bottom:12px">'+
+        tile('Lines',rows.length)+tile('Days',[].concat.apply([],dates.map(function(d){return [d]})).filter(function(v,i,a){return a.indexOf(v)===i}).length)+
+        tile('Grades',Object.keys(mixes).length)+tile('Total Qty',fmt(q))+
+        tile('New',sp.fresh.length,'#1f6b41')+tile('Already in',sp.dup.length,sp.dup.length?'#8a5c0d':'var(--muted)')+
+      '</div>';
+    if(CI.skip)
+      h+='<div style="background:#fff6e6;border:1px solid #f0dcb4;color:#8a5a00;border-radius:9px;padding:9px 12px;font-size:.78rem;margin-bottom:11px">'+
+         '<b>'+CI.skip+' line(s) were left out</b> — they had no readable date or no quantity.</div>';
+    if(sp.dup.length&&CI.mode==='add')
+      h+='<div style="background:#fff6e6;border:1px solid #f0dcb4;color:#8a5c0d;border-radius:9px;padding:9px 12px;font-size:.78rem;line-height:1.6;margin-bottom:12px">'+
+         '<b>'+sp.dup.length+' line(s) are already recorded</b> — same date, grade, TM, slip and quantity. They are left as they are.</div>';
+    var show=sp.fresh.concat(sp.dup);
+    h+='<div class="tblwrap" style="max-height:330px;overflow:auto"><table class="grid"><thead><tr>'+
+      '<th style="width:32px">#</th><th style="width:96px">Date</th><th style="width:88px">Design Mix</th>'+
+      '<th style="min-width:180px">Item / Work (from BOQ)</th><th>Floor</th><th>Segment</th><th>Vendor</th>'+
+      '<th style="width:62px">TM #</th><th style="width:70px">Slip #</th><th style="width:72px;text-align:right">Qty</th>'+
+      '<th style="width:70px;text-align:center">Status</th></tr></thead><tbody>'+
+      show.slice(0,400).map(function(r,i){
+        var isNew=i<sp.fresh.length;
+        var it=r.item||ciItem(ciMix(r.mix),r.floor,r.seg);
+        return '<tr'+(isNew?'':' style="opacity:.55"')+'><td class="dim" style="text-align:center">'+(i+1)+'</td>'+
+          '<td style="white-space:nowrap">'+woFmtDate(r.date)+'</td>'+
+          '<td style="text-align:center"><b>'+X(ciMix(r.mix)||'—')+'</b></td>'+
+          '<td style="font-size:.76rem">'+(it?X(it):'<span style="color:var(--bad)">— not matched to a BOQ item —</span>')+'</td>'+
+          '<td style="font-size:.76rem">'+X(r.floor||'—')+'</td><td style="font-size:.76rem">'+X(r.seg||'—')+'</td>'+
+          '<td style="font-size:.76rem">'+X(r.ven||'—')+'</td>'+
+          '<td style="text-align:center">'+X(r.tm||'—')+'</td><td style="text-align:center">'+X(r.slip||'—')+'</td>'+
+          '<td style="text-align:right;font-weight:700">'+fmt(r.qty)+'</td>'+
+          '<td style="text-align:center;font-size:.7rem;font-weight:800;color:'+(isNew?'#1f6b41':'#8a5c0d')+'">'+(isNew?'NEW':'HAVE IT')+'</td></tr>';
+      }).join('')+'</tbody></table></div>'+
+      (show.length>400?('<div style="font-size:.72rem;color:var(--muted);margin-top:6px">Showing the first 400 of '+show.length+' line(s) — all of them come in.</div>'):'');
+    return {html:h, fresh:sp.fresh, dup:sp.dup};
+  }
+
+  function ciApply(fresh){
+    var who=(typeof currentUser!=='undefined'&&currentUser)?(currentUser.name||''):'';
+    if(CI.mode==='replace'){
+      var snap={};
+      Object.keys(S.days||{}).forEach(function(d){
+        var c=(S.days[d]||{}).concrete||[]; if(c.length)snap[d]=JSON.parse(JSON.stringify(c));
+      });
+      if(typeof rplSnap==='function')rplSnap('conc',snap,'concrete register replaced by a sheet');
+      Object.keys(S.days||{}).forEach(function(d){ if(S.days[d])S.days[d].concrete=[]; });
+    }
+    var n=0, days={};
+    fresh.forEach(function(r){
+      var mix=ciMix(r.mix);
+      var item=r.item||ciItem(mix,r.floor,r.seg);
+      var d=day(r.date);
+      d.concrete.push({
+        item:item, floor:S2(r.floor), mix:mix, segment:S2(r.seg), vendor:S2(r.ven),
+        tm:S2(r.tm), slip:S2(r.slip), unit:ciUnit(r.unit,item), qty:r.qty,
+        time:S2(r.time), slipImg:'', by:who, at:Date.now(), src:'sheet import'
+      });
+      days[r.date]=1; n++;
+    });
+    if(n){
+      save(true);
+      try{ renderConc(); renderConcHistory(); }catch(e){}
+      try{ refreshAux(); }catch(e){}
+    }
+    return {n:n, days:Object.keys(days).length};
+  }
+
+  function ciPaint(ov){
+    var P=ciPanel();
+    var host=ov.querySelector('#ciBody'); if(host)host.innerHTML=P.html;
+    var go=ov.querySelector('#ciGo');
+    if(go){
+      go.style.display=P.fresh.length?'':'none';
+      go.textContent=(CI.mode==='replace')
+        ? ('♻ Replace with '+P.fresh.length+' pour(s)')
+        : ('✔ Import '+P.fresh.length+' new pour(s)');
+      go.onclick=async function(){
+        if(CI.mode==='replace'){
+          var had=0; Object.keys(S.days||{}).forEach(function(d){ had+=(((S.days[d]||{}).concrete)||[]).length; });
+          if(!(await uiConfirm('Replace every concrete pour on record?\n\n'+had+' pour(s) are taken out and '+
+            P.fresh.length+' line(s) from this sheet put in their place.\n\nThe old ones are kept aside — one click undoes this.','Replace all')))return;
+        }
+        var res=ciApply(P.fresh);
+        ov.remove();
+        toast((CI.mode==='replace')
+          ? ('♻ Concrete register replaced — '+res.n+' pour(s) across '+res.days+' day(s). The old ones are kept aside.')
+          : ('✔ '+res.n+' pour(s) added across '+res.days+' day(s)'+(P.dup.length?(' · '+P.dup.length+' were already there'):'')+'.'));
+      };
+    }
+    ov.querySelectorAll('.ci-mode').forEach(function(b){
+      b.onclick=function(){ CI.mode=b.dataset.m; ciPaint(ov); };
+    });
+  }
+
+  async function ciImport(file){
+    var got;
+    try{ got=await ciRead(file); }
+    catch(e){ toast('⚠ Could not read this sheet — it needs a Date and a Quantity column (the Excel reader also needs internet the first time).'); return; }
+    if(!got.rows.length){ toast('No pour line was read from that sheet.'); return; }
+    /* another project's sheet does not belong in this project's register */
+    var here='', refused=[];
+    try{ here=(typeof PROJ!=='undefined'&&PROJ&&PROJ.id)||''; }catch(e){}
+    if(here&&typeof pcOwnerOf==='function'){
+      var keep=[];
+      got.rows.forEach(function(r){
+        var o=r.proj?pcOwnerOf(r.proj):'';
+        if(o&&o!==here)refused.push(r); else keep.push(r);
+      });
+      if(!keep.length){
+        var msg='This sheet is not for '+(((typeof PROJ!=='undefined'&&PROJ)?PROJ.name:'this project'))+
+                ' — every line names another project in its Project column. Open that project and import it there.';
+        toast('⛔ '+msg);
+        try{ if(typeof uiAlert==='function')await uiAlert('⛔  '+msg); }catch(e){}
+        return;
+      }
+      got.rows=keep;
+    }
+    CI={rows:got.rows, skip:got.skipped, mode:'add', refused:refused, sheet:got.sheet||''};
+    var ov=mrOverlay('ciOv','⬆ Import Concrete Record','<div id="ciBody"></div>',
+      '<button class="ghost" id="ciX">Close</button><button class="primary" id="ciGo">✔ Import</button>',1180);
+    ov.style.zIndex='2147483100';
+    var x=ov.querySelector('#ciX'); if(x)x.onclick=function(){ ov.remove(); };
+    ciPaint(ov);
+    var esckey=function(e){ if(e.key==='Escape'){ ov.remove(); document.removeEventListener('keydown',esckey,true); } };
+    document.addEventListener('keydown',esckey,true);
+    ov.addEventListener('click',function(e){ if(e.target===ov)ov.remove(); });
+  }
+
+  /* ---------------- the blank format to fill ---------------- */
+  function ciFormat(){
+    var proj=''; try{ proj=(typeof PROJ!=='undefined'&&PROJ&&PROJ.name)||''; }catch(e){}
+    var mix='', floor='', seg='', unit='Cu.Mtr';
+    try{
+      var b=(S.boq||[]).filter(function(x){ return /psi/i.test(x.name||''); })[0];
+      if(b){ var m=String(b.name).match(/(\d[\d,\.]*)\s*psi/i); if(m)mix='CONCRETE '+m[1].replace(/,/g,'')+' PSI';
+             floor=S2(b.floor); seg=S2(b.sub); }
+    }catch(e){}
+    if(!mix)mix='CONCRETE 4000 PSI';
+    var head=CI_COLS.map(function(c){ return c.t; });
+    var rows=[
+      ['1',proj,'17-Feb-25',mix,floor||'Basement -2',seg||'Piles','Unitone Engineers','1','','','Cu.Mtr','3.75'],
+      ['2',proj,'18-Feb-25',mix,floor||'Basement -2',seg||'Piles','Unitone Engineers','5178','','','Cu.Mtr','4'],
+      ['3',proj,'18-Feb-25',mix,floor||'Basement -2',seg||'Piles','Unitone Engineers','5178','','16:00','Cu.Mtr','3.75']
+    ];
+    var note=['','LEAVE THIS LINE OUT — Date may be 17-Feb-25, 17/02/2025 or a real Excel date. The grade finds its own BOQ line, so no item column is needed. The same line repeated is a separate trip and is counted as one.','','','','','','','','','',''];
+    var esc2=function(v){ v=String(v==null?'':v); return /[",\n]/.test(v)?('"'+v.replace(/"/g,'""')+'"'):v; };
+    var csv=[head.map(esc2).join(',')].concat(rows.map(function(r){ return r.map(esc2).join(','); }))
+             .concat([note.map(esc2).join(',')]).join('\r\n');
+    var blob=new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'});
+    var a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+    a.download='Concrete-Import-Format.csv'; document.body.appendChild(a); a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); },1500);
+    toast('⬇ Format downloaded — fill it in Excel and use ⬆ Import Excel. Save it as .xlsx or .csv, either works.');
+  }
+
+  /* ---------------- wiring ---------------- */
+  function ciWire(){
+    var imp=E('concImport'), f=E('concImpFile'), fmt=E('concFormat');
+    if(imp&&!imp.__w){ imp.__w=1; imp.onclick=function(){
+      if(typeof roBlock==='function'&&roBlock())return;
+      if(f)f.click(); }; }
+    if(f&&!f.__w){ f.__w=1; f.addEventListener('change',function(e){
+      var file=e.target.files&&e.target.files[0]; e.target.value='';
+      if(file)ciImport(file); }); }
+    if(fmt&&!fmt.__w){ fmt.__w=1; fmt.onclick=ciFormat; }
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',ciWire);
+  else ciWire();
+  window.concImportWire=ciWire;
+
+  /* the undo strip for a "Replace all pours" */
+  window.concUndoBanner=function(){
+    try{
+      var tbl=E('concTable'); if(!tbl||typeof rplBanner!=='function')return;
+      rplBanner('conc',tbl.parentNode,function(){ try{ renderConc(); renderConcHistory(); }catch(e){} });
+    }catch(e){}
+  };
+  if(typeof RPL_LABEL!=='undefined')RPL_LABEL['conc']='the Concrete register';
+})();
+</script>
 
 <!-- ================= DAILY DASHBOARD REPORT — logic ================= -->
 <style id="drpCSS">
