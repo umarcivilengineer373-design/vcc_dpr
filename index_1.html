@@ -15403,6 +15403,17 @@ function pbPrevPaid(woId,itemName,excludeId){
   let s=0; pbEarlier('pb',woId,excludeId).forEach(b=>{ (b.rows||[]).forEach(r=>{ if(String(r.item||'').trim()===String(itemName||'').trim()) s+=woNum(r.qty); }); });
   return s;
 }
+/* ---- work done against a work order, in money -------------------------------
+   The cumulative stored on a bill (sumCum) only adds up the ITEMS that bill happens
+   to carry: a BOQ line billed earlier and not repeated on the next bill silently
+   drops out of it — which is why "Previous Work Done" could come out short of the
+   last bill's own total. Work done against a work order is simply every earlier
+   progress bill plus this one, so that is what the forms and summaries use. */
+function pbPrevWork(b){
+  if(!b)return 0;
+  return pbEarlier('pb',b.woId,b.id).reduce(function(s,x){ return s+woNum(x.sumThis); },0);
+}
+function pbCumWork(b){ return pbPrevWork(b)+woNum(b&&b.sumThis); }
 /* previous advances paid for a WO across earlier ADVANCE requests */
 function advPrevPaid(woId,excludeId){
   let s=0; pbEarlier('adv',woId,excludeId).forEach(b=>{ s+=woNum(b.thisReq); });
@@ -16211,15 +16222,19 @@ function pbViewHTML(b){
       <tfoot><tr><td colspan="16" style="${td};text-align:right;font-weight:700;background:#eef2f6">Total</td><td style="${td};text-align:right;font-weight:700;background:#eef2f6">${woMoney(b.sumThis)}</td><td style="${td};text-align:right;font-weight:700;background:#eef2f6">${woMoney(b.sumCum)}</td></tr></tfoot>
     </table>
     <table style="border-collapse:collapse;margin-top:12px;min-width:420px">
-      ${SR('Total Value of Work Done (Cumulative)',woMoney(b.sumCum),1)}
+      ${SR('Work Done — Previous Bills',woMoney(pbPrevWork(b)))}
       ${SR('This Bill Amount',woMoney(b.sumThis),1)}
+      ${SR('Total Value of Work Done (Cumulative)',woMoney(pbCumWork(b)),1)}
       ${SR('Retentation Money d/d ('+(b.retPct||0)+'%)',woMoney(b.ret))}
       ${SR('Mobilization Advance Recovery — Total Advance',woMoney(b.advTotal))}
       ${SR('Recovered up to now',woMoney(b.advPrev))}
       ${SR('In this Bill',woMoney(b.advThis))}
       ${SR('Other Deduction'+(b.dedNote?' — '+esc(b.dedNote):''),woMoney(b.dedAmt||0))}
       ${SR('Net Payable',woMoney(b.net),1)}
-    </table>`+wfMatrixHTML(b)+pbAttHTML(b);
+    </table>`+
+    ((Math.abs(pbCumWork(b)-woNum(b.sumCum))>0.5)
+      ? `<div style="font-size:.66rem;color:#5b6b7b;margin-top:5px;line-height:1.5;max-width:680px">The <b>Cumulative Amount</b> column adds up only the items on this bill. Items billed earlier and not repeated here (${woMoney(pbCumWork(b)-woNum(b.sumCum))} Rs) are not in that column, but they are included in <b>Total Value of Work Done (Cumulative)</b>.</div>`
+      : '')+wfMatrixHTML(b)+pbAttHTML(b);
 }
 /* attachments section for view/print */
 function pbAttHTML(b){
@@ -16497,7 +16512,9 @@ function prfHTML(b){
   if(!b)return '';
   const isPb=(b.type==='pb'), w=b.wf||{};
   const wo=(typeof pbWoById==='function')?pbWoById(b.woId):null;
-  const money=v=>'Rs '+woMoney(v);
+  /* the form is a payment instruction — it carries round rupees, no paisa, so the
+     figure and the amount in words always read the same */
+  const money=v=>'Rs '+((Math.round(woNum(v))||0).toLocaleString('en-US'));
   const today=woFmtDate(iso(new Date()));
   /* earlier progress bills and advances of the same work order */
   const prevPb=pbEarlier('pb',b.woId,b.id), prevAdv=pbEarlier('adv',b.woId,b.id);
@@ -16510,7 +16527,7 @@ function prfHTML(b){
     const advPaid=woNum(b.advTotal)||prevAdvPaid;
     d={ billDate:b.date, billNo:b.no||'', billKind:prfOrdinal(prevPb.length+1)+' progress bill', amount:woNum(b.sumThis), ret:woNum(b.ret), ded:woNum(b.dedAmt),
         remarks:b.dedNote||'', ma:woNum(b.advThis), net:woNum(b.net),
-        maPaid:advPaid, prevWork:(b.sumCum!=null?Math.max(0,woNum(b.sumCum)-woNum(b.sumThis)):prevWork), thisWork:woNum(b.sumThis), totalWork:woNum(b.sumCum),
+        maPaid:advPaid, prevWork:prevWork, thisWork:woNum(b.sumThis), totalWork:prevWork+woNum(b.sumThis),
         retTotal:prevRet+woNum(b.ret), maAdj:(woNum(b.advPrev)||prevRec)+woNum(b.advThis), sumTitle:'Work Done — This Bill' };
   }else{
     d={ billDate:b.date, billNo:b.no||'', billKind:'Mobilization advance @ '+(b.pct||0)+'%', amount:woNum(b.thisReq), ret:0, ded:0,
@@ -16626,7 +16643,18 @@ function prfHTML(b){
 function billPrintHTML(b){ return prfHTML(b)+(b.type==='pb'?pbViewHTML(b):advViewHTML(b)); }
 function pbView(id){ const b=pbAll().find(x=>x.id===id); if(!b)return; pbViewCur=id;
   $('pbViewTitle').textContent=(b.type==='pb'?'Progress Bill ':'Advance Request ')+(b.no||'');
-  $('pbViewBody').innerHTML=(b.type==='pb'?pbViewHTML(b):advViewHTML(b))+wfPanelHTML(b);
+  /* the payment request form is what goes to Accounts first, so it is on screen too —
+     above the bill, in the same order as the print / PDF */
+  $('pbViewBody').innerHTML=
+    '<div style="border:1px solid var(--border2);border-radius:12px;padding:14px 16px;background:#fff;margin-bottom:14px">'+
+      prfHTML(b)+
+    '</div>'+
+    '<div style="display:flex;align-items:center;gap:10px;margin:0 0 12px">'+
+      '<span style="height:1px;flex:1;background:var(--border)"></span>'+
+      '<span style="font-size:.7rem;font-weight:800;letter-spacing:.12em;color:var(--muted);text-transform:uppercase">'+(b.type==='pb'?'Progress Bill':'Advance Request')+'</span>'+
+      '<span style="height:1px;flex:1;background:var(--border)"></span>'+
+    '</div>'+
+    (b.type==='pb'?pbViewHTML(b):advViewHTML(b))+wfPanelHTML(b);
   wfWirePanel(b);
   $('pbViewModal').classList.add('show');
   if(typeof roSweep==='function')setTimeout(roSweep,60);
