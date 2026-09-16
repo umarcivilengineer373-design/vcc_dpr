@@ -6104,6 +6104,7 @@ input.bd-drop{appearance:none;-webkit-appearance:none;cursor:text;padding-right:
     <div class="card-h" bis_skin_checked="1"><h2>BOQ vs Actual Report</h2><span class="hint" id="repAsof">as of Thursday, 27 August 2026</span>
       <span class="spacer"></span>
       <button class="ghost" id="repPhysBtn" style="padding:5px 12px;font-size:.78rem;font-weight:700;margin-right:6px" title="Enter the percentage the site has actually finished — admin password">🔒 Physical Status</button>
+      <button class="ghost" id="repPhysSave" style="display:none;padding:5px 12px;font-size:.78rem;font-weight:700;margin-right:6px;border-color:var(--good);color:var(--good)" title="Save every Physical % typed on this sheet">💾 Save Physical</button>
       <button class="primary" id="printReport">🖨 Print Report</button></div>
     <div class="card-reg" style="gap:10px" bis_skin_checked="1">
       <span class="reg-lbl">Filters:</span>
@@ -11161,17 +11162,67 @@ function physStore(){
   if(!S.physical || typeof S.physical !== 'object') S.physical = {};
   return S.physical;
 }
+/* A BOQ item id is regenerated every time the BOQ is imported again, which used to
+   orphan every Physical % that had been typed. So each figure is kept twice: against
+   the item id, and against the line's own name. If the id is gone, the name finds it
+   again and the id key is healed on the spot. */
+function physNameStore(){
+  if(!S.physicalBy || typeof S.physicalBy !== 'object') S.physicalBy = {};
+  return S.physicalBy;
+}
+function physNameKey(b){
+  if(!b) return '';
+  return [b.group, b.sub, b.name, b.floor]
+    .map(function(x){ return String(x == null ? '' : x).trim().toLowerCase(); }).join('|');
+}
+function physBoq(id){
+  return (S.boq || []).filter(function(x){ return String(x.id) === String(id); })[0] || null;
+}
 function physGet(id){
   var v = physStore()[id];
+  if(v === undefined || v === null || v === ''){
+    var b = physBoq(id), k = b ? physNameKey(b) : '';
+    if(k){
+      var w = physNameStore()[k];
+      if(w !== undefined && w !== null && w !== ''){ physStore()[id] = w; v = w; }
+    }
+  }
   if(v === undefined || v === null || v === '') return null;
   v = parseFloat(v);
   return isFinite(v) ? Math.max(0, Math.min(100, v)) : null;
 }
-function physSet(id, v){
-  var st = physStore();
-  if(v === null || v === '' || v === undefined) delete st[id];
-  else st[id] = Math.max(0, Math.min(100, parseFloat(v) || 0));
+function physSet(id, v, noSave){
+  var st = physStore(), nm = physNameStore();
+  var b = physBoq(id), k = b ? physNameKey(b) : '';
+  if(v === null || v === '' || v === undefined){ delete st[id]; if(k) delete nm[k]; }
+  else{
+    var n = Math.max(0, Math.min(100, parseFloat(v) || 0));
+    st[id] = n; if(k) nm[k] = n;
+  }
+  if(!noSave){ try{ save(true); }catch(e){} }
+}
+/* how many lines carry a figure right now */
+function physCount(){
+  var st = physStore(), n = 0;
+  (S.boq || []).forEach(function(b){ if(physGet(b.id) !== null) n++; });
+  return n;
+}
+/* every open box is written in, then the whole lot is saved and sent to the cloud */
+function physSaveAll(){
+  try{
+    var host = document.getElementById('repBody');
+    if(host) host.querySelectorAll('.phys-in').forEach(function(inp){
+      var v = String(inp.value).trim();
+      physSet(inp.dataset.bid, v === '' ? null : v, true);
+    });
+  }catch(e){}
   try{ save(true); }catch(e){}
+  try{ if(typeof cloudSaveMeta === 'function') cloudSaveMeta(); }catch(e){}
+  var n = physCount();
+  try{ toast('\u2714 Physical Status saved — ' + n + ' line(s). It travels with the backup and the cloud.'); }catch(e){}
+  try{ if(document.getElementById('tab-effrep') &&
+          document.getElementById('tab-effrep').classList.contains('on')) renderEffRep(); }catch(e){}
+  return n;
 }
 
 /* ---- the admin password, every time the column is opened ------------------
@@ -11181,7 +11232,7 @@ function physSet(id, v){
 var PHYS_OPEN = false;
 
 async function physUnlock(){
-  if(PHYS_OPEN){ PHYS_OPEN = false; renderReport(); return; }
+  if(PHYS_OPEN){ try{ physSaveAll(); }catch(e){} PHYS_OPEN = false; renderReport(); return; }
   try{ if(typeof roBlock === 'function' && roBlock()) return; }catch(e){}
   var p = await pinDialog('\u{1F510} Enter the ADMIN password to enter Physical Status:', false);
   if(p === null) return;
@@ -11280,6 +11331,11 @@ function physWire(){
     inp.addEventListener('blur', commit);
     inp.addEventListener('keydown', function(e){ if(e.key === 'Enter'){ e.preventDefault(); inp.blur(); } });
   });
+  var sb = document.getElementById('repPhysSave');
+  if(sb){
+    sb.style.display = PHYS_OPEN ? '' : 'none';
+    if(!sb.__wired){ sb.__wired = 1; sb.onclick = function(e){ e.preventDefault(); physSaveAll(); }; }
+  }
   var btn = document.getElementById('repPhysBtn');
   if(btn){
     btn.textContent = PHYS_OPEN ? '\u{1F513} Physical — open' : '\u{1F512} Physical Status';
@@ -42502,7 +42558,11 @@ async function cloudSaveMeta(){
   try{
     await supaPush('settings',[{item_id:'main',data:{
       settings:S.settings,roles:S.roles,segments:S.segments,
-      vendors:S.vendors,activeTarget:S.activeTarget,_ver:S._ver}}]);
+      vendors:S.vendors,activeTarget:S.activeTarget,
+      /* Physical Status used to stay on one device only, so the Efficiency Report
+         was empty everywhere else — it goes up with the project meta now */
+      physical:S.physical||{}, physicalBy:S.physicalBy||{},
+      _ver:S._ver}}]);
     await cloudSyncBoq();
     await supaPush('target',(S.targets||[]).map(function(t){return{item_id:t.id,data:t};}));
     cloudStatus('ok');
@@ -43052,6 +43112,10 @@ async function cloudPullAll(silent){
       if(m.segments) S.segments=m.segments;
       if(m.vendors)  S.vendors=m.vendors;
       if(m.activeTarget) S.activeTarget=m.activeTarget;
+      /* merged, never replaced: a device that has figures the cloud has not seen yet
+         must not lose them to an older cloud copy */
+      if(m.physical&&typeof m.physical==='object')   S.physical=Object.assign({},S.physical||{},m.physical);
+      if(m.physicalBy&&typeof m.physicalBy==='object')S.physicalBy=Object.assign({},S.physicalBy||{},m.physicalBy);
     }
     if(boq.length){ S.boq=boq.map(function(x){return x.data;}); try{ if(window.boqPruneForeign)window.boqPruneForeign(S); }catch(e){} }
     if(tgts.length) S.targets=tgts.map(function(x){return x.data;});
