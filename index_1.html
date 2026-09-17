@@ -18214,6 +18214,53 @@ function rplApply(key){
   rplDrop(key); save(true); return true;
 }
 function rplWhen(t){ try{ return wfFmtTs(t); }catch(e){ return ''; } }
+/* ---- Merge: put the kept-aside entries back WITHOUT throwing away what replaced
+   them. Every line that is already there, line for line, is skipped — so nothing
+   is doubled. This is what you want after a Replace that turned out to be an Add. */
+function rplCanMerge(key){ return key==='conc'||key==='store.in'||key==='store.out'||key==='store.all'; }
+function rplConcKey(c){
+  return [String(c&&c.mix||'').trim().toLowerCase(),String(c&&c.tm||'').trim(),
+          String(c&&c.slip||'').trim(),String(woNum(c&&c.qty))].join('|');
+}
+function rplStoreKey(r){
+  return [String(r&&r.date||''),String(r&&r.item||'').trim().toLowerCase(),
+          String(woNum(r&&r.qty)),String((r&&(r.to||r.vendor))||'').trim().toLowerCase(),
+          String(r&&r.src||'')].join('|');
+}
+function rplMergeList(cur,old,keyFn){
+  var have={}; (cur||[]).forEach(function(x){ var k=keyFn(x); have[k]=(have[k]||0)+1; });
+  var seen={}, add=[];
+  (old||[]).forEach(function(x){
+    var k=keyFn(x); seen[k]=(seen[k]||0)+1;
+    if(seen[k]<=(have[k]||0))return;            /* already there, line for line */
+    add.push(x);
+  });
+  return {list:(cur||[]).concat(add), added:add.length};
+}
+function rplMerge(key){
+  var u=rplGet(key); if(!u||!u.data)return 0;
+  var d=u.data, n=0;
+  if(key==='conc'){
+    Object.keys(d).forEach(function(dt){
+      var cur=(S.days&&S.days[dt]&&S.days[dt].concrete)||[];
+      var r=rplMergeList(cur,d[dt]||[],rplConcKey);
+      if(r.added){ day(dt).concrete=r.list; n+=r.added; }
+    });
+  }else if(key==='store.in'||key==='store.out'){
+    var kk=(key==='store.in')?'in':'out';
+    var st=storeState();
+    var r2=rplMergeList(st[kk]||[],d||[],rplStoreKey);
+    st[kk]=r2.list; n=r2.added;
+  }else if(key==='store.all'){
+    var st2=storeState();
+    ['items','in','out'].forEach(function(kk2){
+      var r3=rplMergeList(st2[kk2]||[],d[kk2]||[],
+        kk2==='items'?function(x){ return String(x&&x.name||'').trim().toLowerCase(); }:rplStoreKey);
+      st2[kk2]=r3.list; n+=r3.added;
+    });
+  }else return 0;
+  rplDrop(key); save(true); return n;
+}
 /* the yellow strip: shown on the sheet while a replaced copy is still held */
 function rplBanner(key,beforeEl,after){
   var id='rplB_'+key.replace(/[^a-z]/gi,'_'), host=document.getElementById(id);
@@ -18228,8 +18275,18 @@ function rplBanner(key,beforeEl,after){
   host.innerHTML='<div style="flex:1;min-width:250px"><b>&#9851; '+esc(RPL_LABEL[key]||key)+' was replaced</b> — '+
       n+' earlier entr'+(n===1?'y is':'ies are')+' still kept aside'+(u.by?(' · by '+esc(u.by)):'')+
       (u.at?(' · '+esc(rplWhen(u.at))):'')+'.</div>'+
+    (rplCanMerge(key)?('<button type="button" class="ghost" data-a="merge" style="padding:5px 13px;font-size:.76rem;font-weight:700;border-color:#1f8f4e;color:#1f6b41">&#8853; Merge — keep both</button>'):'')+
     '<button type="button" class="ghost" data-a="undo" style="padding:5px 13px;font-size:.76rem;font-weight:700;border-color:#b7952a;color:#8a6d1a">&#8617; Undo — put them back</button>'+
     '<button type="button" class="ghost" data-a="ok" style="padding:5px 11px;font-size:.74rem">&#10003; Keep the new data</button>';
+  var mb=host.querySelector('[data-a="merge"]');
+  if(mb)mb.onclick=async function(){
+    if(typeof roBlock==='function'&&roBlock())return;
+    if(!(await uiConfirm('Put the earlier '+n+' entry(ies) back BESIDE what replaced them?\n\n'+
+        'Nothing is thrown away. Any line that is already there — same date, grade, TM, slip and quantity — is skipped, so nothing is doubled.','Merge')))return;
+    var added=rplMerge(key);
+    toast('\u2295 Merged — '+added+' earlier entry(ies) brought back beside the new data.');
+    if(typeof after==='function')after();
+  };
   host.querySelector('[data-a="undo"]').onclick=async function(){
     if(typeof roBlock==='function'&&roBlock())return;
     if(!(await uiConfirm('Put the earlier '+n+' entry(ies) back?\n\nWhatever replaced them is dropped.','Undo')))return;
