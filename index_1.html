@@ -6043,7 +6043,7 @@ input.bd-drop{appearance:none;-webkit-appearance:none;cursor:text;padding-right:
     <div class="card-h" bis_skin_checked="1"><h2>Concrete Record — <span id="concDateLabel">Tue, 15 Sept 2026</span></h2><span class="hint">pours on this day</span>
       <span class="spacer"></span>
       <input type="file" id="concImpFile" accept=".xlsx,.xls,.csv" style="display:none">
-      <button class="ghost" id="concImport" style="padding:5px 12px;font-size:.78rem;border-color:#1f8f4e;color:#1f8f4e" title="Read an Excel of earlier ready-mix pours — every line lands on its own date (master password)">🔒 Import Excel</button>
+      <button class="ghost admin-only" id="concImport" style="padding:5px 12px;font-size:.78rem;border-color:#1f8f4e;color:#1f8f4e" title="Read an Excel of earlier ready-mix pours — every line lands on its own date (master password)">🔒 Import Excel</button>
       <button class="ghost" id="concFormat" style="padding:5px 12px;font-size:.78rem" title="Download the blank format to fill">⬇ Format</button>
       <button class="ghost" id="printConc" style="padding:5px 12px;font-size:.78rem">🖨 Print</button>
       <button class="ghost" id="concEditBtn" style="padding:5px 12px;font-size:.78rem">🔓 Edit (Admin)</button>
@@ -12949,22 +12949,64 @@ function load(){
      particular file is opened on a computer, that baked-in data takes over the
      older copy sitting in this browser. The previous copy is stashed under a
      backup key first, so nothing is thrown away. */
+  /* ---- how much real work a copy holds — used to decide which one wins ---- */
+  try{
+    window.stWeight=window.stWeight||function(o){
+      if(!o||typeof o!=='object')return 0;
+      var n=0;
+      try{ n+=((o.boq||[]).length)*2; }catch(e){}
+      try{ Object.keys(o.days||{}).forEach(function(d){
+        var x=o.days[d]||{};
+        n+=1+((x.concrete||[]).length)+((x.progress||[]).length)+((x.activities||[]).length)+((x.photos||[]).length);
+      }); }catch(e){}
+      try{ n+=((o.workOrders||[]).length)+((o.progressBills||[]).length); }catch(e){}
+      try{ var st=o.store||{}; n+=((st.in||[]).length)+((st.out||[]).length)+((st.items||[]).length); }catch(e){}
+      try{ var P=o.proc||{}; n+=((P.prdr||[]).length)+((P.po||[]).length)+((P.igp||[]).length)+((P.grn||[]).length); }catch(e){}
+      return n;
+    };
+  }catch(e){}
+  /* ---- the data baked into this file takes over ONLY when it is safe ----------
+     A newer copy of the app arrives with a snapshot of the data baked in. That
+     snapshot is right for a fresh computer, but on a computer that has been in
+     use it must never wipe what the site has entered since the export. Two things
+     went wrong before and are now guarded:
+       1. the "this stamp is done" note is written to localStorage, and on a full
+          localStorage that write silently failed — so the takeover ran again on
+          EVERY open and swallowed the day's work each time. The note now also goes
+          to the device database, and if NEITHER can hold it the takeover is
+          skipped altogether.
+       2. the takeover ran even when the browser held far more work than the
+          snapshot. Now the richer copy always wins. */
   try{
     var stamp=window.__SEED_STAMP__||'';
     var sd=projSeed();                       /* the seed of THIS project, not always the first one */
-    if(stamp && sd && localStorage.getItem(LS_KEY+'__stamp')!==stamp){
-      var prevRaw=localStorage.getItem(LS_KEY), prev=null;
-      if(prevRaw){ try{prev=JSON.parse(prevRaw);}catch(e){} 
-        try{localStorage.setItem(LS_KEY+'__prev',prevRaw);}catch(e){/* storage full — skip the stash */} }
+    var stKey=LS_KEY+'__stamp', done='';
+    try{ done=localStorage.getItem(stKey)||''; }catch(e){}
+    if(!done){ try{ done=String(window.__STAMP_IDB__&&window.__STAMP_IDB__[LS_KEY]||''); }catch(e){} }
+    if(stamp && sd && done!==stamp){
+      var prevRaw=null; try{ prevRaw=localStorage.getItem(LS_KEY); }catch(e){}
+      var prev=null; if(prevRaw){ try{prev=JSON.parse(prevRaw);}catch(e){} }
+      /* can the "done" note actually be kept? if not, do NOT take over */
+      var noteOk=false;
+      try{ localStorage.setItem(stKey,stamp); noteOk=(localStorage.getItem(stKey)===stamp); }catch(e){ noteOk=false; }
+      try{ if(typeof idbPutKey==='function')idbPutKey(PROJ.idb,'seed_stamp',stamp); }catch(e){}
       var fresh=normState(JSON.parse(JSON.stringify(sd)));
-      /* keep any Work-Plan target sheets the user already built — the new data set has none */
-      if(prev && Array.isArray(prev.targets) && prev.targets.length && !(fresh.targets||[]).length){
-        fresh.targets=prev.targets; fresh.activeTarget=prev.activeTarget;
+      var wSeed=stWeight(fresh), wPrev=stWeight(prev);
+      if(!noteOk || (prev && wPrev>wSeed)){
+        /* either the note could not be kept (so this would repeat every open), or
+           this browser holds more than the snapshot — keep what is here */
+        try{ console.info('seed takeover skipped — local '+wPrev+' vs seed '+wSeed+(noteOk?'':' · stamp note could not be saved')); }catch(e){}
+        try{ if(prev)return normState(prev); }catch(e){}
+      }else{
+        if(prevRaw){ try{localStorage.setItem(LS_KEY+'__prev',prevRaw);}catch(e){} }
+        /* keep any Work-Plan target sheets the user already built — the new data set has none */
+        if(prev && Array.isArray(prev.targets) && prev.targets.length && !(fresh.targets||[]).length){
+          fresh.targets=prev.targets; fresh.activeTarget=prev.activeTarget;
+        }
+        try{localStorage.setItem(LS_KEY,JSON.stringify(fresh));}catch(e){}
+        try{ seedModules(); }catch(e){}
+        return fresh;
       }
-      try{localStorage.setItem(LS_KEY+'__stamp',stamp);}catch(e){}
-      try{localStorage.setItem(LS_KEY,JSON.stringify(fresh));}catch(e){}
-      try{ seedModules(); }catch(e){}
-      return fresh;
     }
   }catch(e){console.warn('seed takeover',e)}
   try{const raw=localStorage.getItem(LS_KEY); if(raw)return normState(JSON.parse(raw));}catch(e){console.warn(e)}
@@ -13028,8 +13070,19 @@ function idbStateGet(cb){ idbState(function(db){ if(!db){cb(null);return;} try{ 
    SECOND project's store — losing work in one and corrupting the other.
    Two guards now: the pending save remembers WHICH project it belongs to and always
    writes there, and switching project flushes anything pending first. ---- */
+/* The browser's quick cache (localStorage) can hold a copy that is OLDER than the
+   one in the device database — that is exactly what happens once the cache is full.
+   Boot reads the cache first and checks the database a moment later. If anything
+   saved in that gap, the old copy was written back with a higher version number and
+   the good copy could never win again. So saves WAIT until that check is done. */
+var IDB_CHECKED=false, _saveHeld=null;
+function idbCheckDone(){
+  IDB_CHECKED=true;
+  if(_saveHeld){ var f=_saveHeld; _saveHeld=null; try{ save(true); }catch(e){} }
+}
 function save(now){
   if(typeof roBlock==='function'&&isReadOnly&&isReadOnly()){ roBlock(); return; }
+  if(!IDB_CHECKED){ _saveHeld=1; return; }        /* held until the database check lands */
   clearTimeout(saveTimer);
   const owner=PROJ;                                   /* the project this save belongs to */
   const doSave=()=>{
@@ -18207,8 +18260,10 @@ function rplApply(key){
   else if(key==='store.all'){ var st=storeState(); st.items=d.items||[]; st.in=d.in||[]; st.out=d.out||[]; }
   else if(key==='proc'){ var P=procState(); ['prdr','po','igp','grn'].forEach(function(k){ P[k]=d[k]||[]; }); }
   else if(key==='conc'){
-    Object.keys(S.days||{}).forEach(function(dt){ if(S.days[dt])S.days[dt].concrete=[]; });
-    Object.keys(d||{}).forEach(function(dt){ try{ day(dt).concrete=d[dt]||[]; }catch(e){} });
+    var touched={};
+    Object.keys(S.days||{}).forEach(function(dt){ if(S.days[dt]&&(S.days[dt].concrete||[]).length){ S.days[dt].concrete=[]; touched[dt]=1; } });
+    Object.keys(d||{}).forEach(function(dt){ try{ day(dt).concrete=d[dt]||[]; touched[dt]=1; }catch(e){} });
+    try{ if(window.cloudPushDays)setTimeout(function(){ window.cloudPushDays(Object.keys(touched)); },400); }catch(e){}
   }
   else return false;
   rplDrop(key); save(true); return true;
@@ -18241,11 +18296,13 @@ function rplMerge(key){
   var u=rplGet(key); if(!u||!u.data)return 0;
   var d=u.data, n=0;
   if(key==='conc'){
+    var touched2={};
     Object.keys(d).forEach(function(dt){
       var cur=(S.days&&S.days[dt]&&S.days[dt].concrete)||[];
       var r=rplMergeList(cur,d[dt]||[],rplConcKey);
-      if(r.added){ day(dt).concrete=r.list; n+=r.added; }
+      if(r.added){ day(dt).concrete=r.list; n+=r.added; touched2[dt]=1; }
     });
+    try{ if(window.cloudPushDays)setTimeout(function(){ window.cloudPushDays(Object.keys(touched2)); },400); }catch(e){}
   }else if(key==='store.in'||key==='store.out'){
     var kk=(key==='store.in')?'in':'out';
     var st=storeState();
@@ -40793,18 +40850,30 @@ window.addEventListener('beforeunload',function(){ try{flushSave()}catch(e){} })
    This is what keeps your data from "disappearing" when the browser drops
    localStorage. ---- */
 idbStateGet(function(raw){
-  if(!raw)return;
   try{
+    if(!raw)return;
     var idbS=(typeof raw==='string')?JSON.parse(raw):raw;
-    if(idbS && (idbS._ver||0) > (S._ver||0)){
+    if(!idbS)return;
+    /* The version number alone is not enough: a stale cache that has been saved
+       over a few times carries a HIGHER version than the database copy that holds
+       the real work. So the copy that holds more work wins, and the version only
+       decides when both hold the same amount. */
+    var wIdb=0, wNow=0;
+    try{ wIdb=stWeight(idbS); wNow=stWeight(S); }catch(e){}
+    var take=(wIdb>wNow) || (wIdb===wNow && (idbS._ver||0)>(S._ver||0));
+    if(take){
       S=normState(idbS);
       try{ localStorage.setItem(LS_KEY,JSON.stringify(S)); }catch(e){}   /* repair the fast cache */
       try{ restoreProjectDate(); }catch(e){}   /* the newer copy may hold the day we were on */
       renderAll(); if(typeof renderSetup==='function')renderSetup();
       setDot('Restored');
+      try{ if(wIdb>wNow+5) toast('\u21ba Restored from this device\u2019s database — the browser cache was holding an older copy.'); }catch(e){}
     }
   }catch(e){ console.warn('idb restore',e); }
+  finally{ try{ idbCheckDone(); }catch(e){} }
 });
+/* if the database never answers, do not hold saves for ever */
+setTimeout(function(){ try{ if(!IDB_CHECKED)idbCheckDone(); }catch(e){} },6000);
 
 </script><div id="nfTopPanel" style="display: none; position: fixed; top: 58px; right: 16px; width: 390px; max-width: 94vw; max-height: 70vh; overflow: auto; background: rgb(255, 255, 255); border: 1px solid var(--border); border-radius: 12px; box-shadow: rgba(10, 25, 41, 0.22) 0px 18px 44px; padding: 12px 14px; z-index: 9000;" bis_skin_checked="1"></div>
 
@@ -43146,6 +43215,28 @@ window.cloudFixFiles=async function(silent){
 };
 
 /* ---------- send everything up (first run / manual) ---------- */
+/* After a normal save only the day on screen is sent up. An import writes hundreds
+   of days at once, so every one of them has to go — otherwise the sheet lives in
+   this browser alone and any other computer (or a re-open after the cache is
+   cleared) shows nothing. */
+async function cloudPushDays(dates){
+  if(!cloudOn())return 0;
+  var list=(dates||[]).filter(function(d){ return /^\d{4}-\d{2}-\d{2}$/.test(d)&&S.days&&S.days[d]; });
+  if(!list.length)return 0;
+  cloudStatus('sync');
+  try{
+    for(var i=0;i<list.length;i+=15){
+      await supaPush('day',list.slice(i,i+15).map(function(d){
+        return {item_id:d,data:dayForCloud(S.days[d])};
+      }));
+      cloudStatus('sync','\u2601 '+Math.min(i+15,list.length)+'/'+list.length);
+    }
+    try{ await cloudSaveMeta(); }catch(e){}
+    cloudStatus('ok');
+    return list.length;
+  }catch(e){ cloudStatus('err'); console.warn('cloudPushDays',e); return 0; }
+}
+window.cloudPushDays=cloudPushDays;
 async function cloudPushAll(){
   if(!cloudOn()){ cloudStatus('off'); return; }
   cloudStatus('sync');
@@ -45844,6 +45935,12 @@ storageNote();
       save(true);
       try{ renderConc(); renderConcHistory(); }catch(e){}
       try{ refreshAux(); }catch(e){}
+      /* every day the sheet touched goes to the server, not just the one on screen */
+      try{
+        if(window.cloudPushDays) window.cloudPushDays(Object.keys(days)).then(function(k){
+          if(k)try{ toast('\u2601 '+k+' day(s) sent to the server.'); }catch(e){}
+        });
+      }catch(e){}
     }
     return {n:n, days:Object.keys(days).length};
   }
