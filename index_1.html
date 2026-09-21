@@ -36090,7 +36090,11 @@ if(document.getElementById('lgBack2'))document.getElementById('lgBack2').onclick
     }
   }catch(e){}
   if(!open)return;
-  try{ history.replaceState(null,'',location.pathname+location.search); }catch(e){}
+  /* The address keeps #p=… only when the choice could NOT be remembered anywhere
+     else — on a full cache that address is the one thing that survives a reload. */
+  var remembered=false;
+  try{ remembered=(localStorage.getItem(PROJ_KEY)===want); }catch(e){}
+  if(remembered){ try{ history.replaceState(null,'',location.pathname+location.search); }catch(e){} }
   window.__gotoHold=1;
   var hold=setInterval(function(){
     if(!window.__gotoHold||currentUser){ clearInterval(hold); return; }
