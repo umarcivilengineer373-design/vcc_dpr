@@ -12762,9 +12762,28 @@ function allProjects(){ return BUILTIN_PROJECTS.concat((mrLoad().projects||[]).m
 var PROJECTS = allProjects();
 
 const PROJ_KEY='eo_active_project';
+/* Which project the app opens as.
+   Picking a project used to be remembered in the browser's quick cache alone. On a
+   cache that is full that write fails silently, so after the reload the app came back
+   as the FIRST project — the card looked dead, and a newly added project could never
+   be opened. The choice now travels in the address (#p=…) and in the tab's own
+   storage as well, either of which survives a full cache. */
+function projWanted(){
+  var id='';
+  try{ id=(String(location.hash||'').match(/(?:^#|&)p=([A-Za-z0-9_-]+)/)||[])[1]||''; }catch(e){}
+  if(!id){ try{ id=sessionStorage.getItem('eo_goto_project')||''; }catch(e){} }
+  if(!id){ try{ id=sessionStorage.getItem(PROJ_KEY)||''; }catch(e){} }
+  if(!id){ try{ id=localStorage.getItem(PROJ_KEY)||''; }catch(e){} }
+  return id;
+}
+/* remember it in every store that will take it */
+function projRemember(id){
+  try{ localStorage.setItem(PROJ_KEY,id); }catch(e){}
+  try{ sessionStorage.setItem(PROJ_KEY,id); }catch(e){}
+}
 function activeProject(){
   PROJECTS=allProjects();
-  const id=localStorage.getItem(PROJ_KEY);
+  var id=projWanted();
   return PROJECTS.find(p=>p.id===id) || PROJECTS[0];
 }
 let PROJ = activeProject();
@@ -38567,14 +38586,20 @@ function restoreProjectDate(){
   try{ setDate(want); }catch(e){}
 }
 function selectProject(pid){
-  const pr=PROJECTS.find(function(x){return x.id===pid}); if(!pr)return;
+  /* The list is read fresh here. It used to be the copy taken when the app started,
+     so a project added from Master Settings in this same session was NOT in it — its
+     card appeared on the picker but clicking it fell straight through and nothing
+     happened. */
+  PROJECTS=allProjects();
+  const pr=PROJECTS.find(function(x){return x.id===pid});
+  if(!pr){ try{ toast('That project is not on the list — close and open the app once, then try again.'); }catch(e){} return; }
   flushSave();                       /* anything still waiting belongs to the OLD project */
   /* Only stamp when we are really leaving a project. Re-picking the project we are
      already on would otherwise write the boot date over the remembered one. */
   var _switching=!!(PROJ && PROJ.id!==pr.id);
   if(_switching){
     try{ localStorage.setItem('eo_lastdate_'+PROJ.id, curDate); }catch(e){}
-    try{ localStorage.setItem(PROJ_KEY,pr.id); }catch(e){}
+    projRemember(pr.id);
     /* PROJ, LS_KEY and S stay THIS project's until the reload: whatever is flushed on the
        way out (pagehide) then lands in this project's own table, never the other one's.
        The day on screen is sent up first (max 2.5 s), then the app reloads as the new project. */
@@ -38594,7 +38619,7 @@ function selectProject(pid){
     setTimeout(_go,150); return;
   }
   PROJ=pr; LS_KEY=pr.lsKey;
-  try{ localStorage.setItem(PROJ_KEY,pr.id); }catch(e){}
+  projRemember(pr.id);
   /* ---- Project badalne par app POORI dobara load hoti hai ----------------
      Pehle sirf PROJ aur LS_KEY badal diye jate the aur naya state async
      aata tha. Us darmiyani lamhe me S abhi PICHLE project ka hota tha jabki
