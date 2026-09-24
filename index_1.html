@@ -50862,7 +50862,7 @@ function cosNeedEdit(){ if(cosCanEdit())return true; T('Your COS account is view
 /* ================= TASKS =================
    The COS Diary sheet: S.No · Date · Project · Detail of Work / Activity ·
    Location · POC / Responsible · Target Date · Priority · Updates · Status  */
-var TF={q:'',proj:'',poc:'',stat:'',prio:'',from:'',to:''};
+var TF={q:'',proj:'',poc:'',stat:'',prio:'',from:'',to:'',src:''};
 
 function taskDue(t){
   if(!t.target)return '';
@@ -50893,24 +50893,108 @@ function taskRows(){
     return s||(num(b.sno)-num(a.sno));
   });
 }
+/* ---------- the register shows everything: tasks, MOM points and the daily list ---------- */
+function taskFilterOk(r){
+  var q=TF.q.toLowerCase();
+  if(TF.src&&r.src!==TF.src)return false;
+  if(TF.proj&&r.project!==TF.proj)return false;
+  if(TF.poc&&r.poc!==TF.poc)return false;
+  var closed=(r.status==='Completed'||r.status==='Cancelled'||r.status==='Closed'||r.status==='Done');
+  if(TF.stat==='__open'){ if(closed)return false; }
+  else if(TF.stat==='__late'){ if(r.flag!=='Overdue')return false; }
+  else if(TF.stat&&r.status!==TF.stat)return false;
+  if(TF.prio&&r.priority!==TF.prio)return false;
+  if(TF.from&&String(r.date||'')<TF.from)return false;
+  if(TF.to&&String(r.date||'')>TF.to)return false;
+  if(q&&[r.detail,r.sub,r.project,r.location,r.poc,r.ref,r.note].join(' ').toLowerCase().indexOf(q)<0)return false;
+  return true;
+}
+function dueFlag(target,status){
+  if(!target)return '';
+  if(status==='Completed'||status==='Cancelled'||status==='Closed'||status==='Done')return '';
+  var d=daysBetween(today(),target);
+  if(d<0)return 'Overdue';
+  if(d===0)return 'Due today';
+  return '';
+}
+/* every line of the three registers, in one shape */
+function taskAll(){
+  var out=[];
+  (COS.tasks||[]).forEach(function(t){
+    out.push({src:'task',kind:'Task',id:t.id,sno:t.sno||'',date:t.date||'',project:t.project||'',
+      detail:t.detail||'',sub:t.remarks||'',location:t.location||'',poc:t.poc||'',
+      target:t.target||'',priority:t.priority||'Normal',status:t.status||'Open',
+      flag:taskDue(t),lu:lastUpd(t),nUpd:(t.updates||[]).length,ref:'',raw:t});
+  });
+  /* MOM action points */
+  (COS.mom||[]).forEach(function(m){
+    if(m._del)return;
+    var projs=(typeof momProjs==='function')?momProjs(m):(m.project?[m.project]:[]);
+    (m.points||[]).forEach(function(p0){
+      var p=(typeof momPt==='function')?momPt(p0):p0;
+      if(!String(p.agenda||'').trim()&&!String(p.action||'').trim())return;
+      var iso=(typeof momDate==='function')?momDate(p.due):'';
+      var st=(p.status==='Closed')?'Completed':(p.status||'Open');
+      out.push({src:'mom',kind:'MOM',id:m.id+'|'+p.id,sno:(m.ref||'MOM'),date:m.date||'',
+        project:projs[0]||'',detail:p.action||p.agenda||'',
+        sub:(p.action&&p.agenda?('Point: '+p.agenda):'')+(p.rem?((p.action&&p.agenda?' \u00b7 ':'')+p.rem):''),
+        location:m.venue||'',poc:p.by||'',
+        target:iso,targetTxt:p.due||'',priority:'Normal',status:st,
+        flag:dueFlag(iso,st),lu:null,nUpd:0,ref:(m.ref||'')+' \u00b7 '+(m.agenda||m.title||''),
+        raw:{m:m,p:p}});
+    });
+  });
+  /* Daily Work To Do */
+  (COS.dwt||[]).forEach(function(r){
+    if(r._del)return;
+    if(!String(r.work||'').trim())return;
+    var st=(r.status==='Done')?'Completed':(r.status==='Cancelled'?'Cancelled':(r.status||'Open'));
+    out.push({src:'daily',kind:'Daily',id:r.id,sno:'',date:r.d||'',project:r.proj||'',
+      detail:r.work||'',sub:r.note||'',location:'',poc:r.by||'',
+      target:r.d||'',targetTxt:'',priority:'Normal',status:st,
+      flag:dueFlag(r.d,st),lu:null,nUpd:0,
+      ref:(r.raised&&r.raised!==r.d)?('raised '+dShort(r.raised)):'',raw:r});
+  });
+  return out;
+}
+function taskAllRows(){
+  return taskAll().filter(taskFilterOk).sort(function(a,b){
+    return String(b.date||'').localeCompare(String(a.date||''))||
+           String(a.src).localeCompare(String(b.src))||
+           (num(b.sno)-num(a.sno));
+  });
+}
 function lastUpd(t){
   var u=(t.updates||[]);
   if(!u.length)return null;
   return u[u.length-1];
 }
+function srcChip(src){
+  var m={task:['#e8f1fb','#1d5a8f','✅ Task'],
+         mom:['#f2eefc','#5b47a0','📝 MOM'],
+         daily:['#fff4e0','#9a6410','🗓 Daily']};
+  var c=m[src]||m.task;
+  return '<span style="background:'+c[0]+';color:'+c[1]+';border-radius:7px;padding:2px 7px;'+
+    'font-size:.66rem;font-weight:800;white-space:nowrap">'+c[2]+'</span>';
+}
 function cosTaskTab(body){
-  var list=taskRows(), all=COS.tasks||[];
-  var open=all.filter(function(t){ return t.status!=='Completed'&&t.status!=='Cancelled'; });
-  var late=all.filter(function(t){ return taskDue(t)==='Overdue'; });
+  var list=taskAllRows(), all=taskAll();
+  var shut=function(r){ return r.status==='Completed'||r.status==='Cancelled'; };
+  var open=all.filter(function(r){ return !shut(r); });
+  var late=all.filter(function(r){ return r.flag==='Overdue'; });
+  var nMom=all.filter(function(r){ return r.src==='mom'; }).length;
+  var nDay=all.filter(function(r){ return r.src==='daily'; }).length;
+  var nTsk=all.filter(function(r){ return r.src==='task'; }).length;
   body.innerHTML=
     '<div class="kpi">'+
-      '<div class="b"><div class="n">'+all.length+'</div><div class="l">Tasks on record</div></div>'+
+      '<div class="b"><div class="n">'+all.length+'</div><div class="l">Everything on record</div></div>'+
       '<div class="b" style="border-left-color:#d99a2b"><div class="n">'+open.length+'</div><div class="l">Still open</div></div>'+
       '<div class="b" style="border-left-color:#b02a2a"><div class="n">'+late.length+'</div><div class="l">Overdue</div></div>'+
       '<div class="b" style="border-left-color:#1c7a42"><div class="n">'+(all.length-open.length)+'</div><div class="l">Closed</div></div>'+
     '</div>'+
     '<div class="cos-card"><div class="cos-ch"><h3>✅ Tasks</h3>'+
-      '<span class="hint">every project in one register</span>'+
+      '<span class="hint">everything in one register — '+nTsk+' task'+(nTsk===1?'':'s')+
+        ' · '+nMom+' MOM point'+(nMom===1?'':'s')+' · '+nDay+' daily line'+(nDay===1?'':'s')+'</span>'+
       '<span class="sp"></span>'+
       (cosCanEdit()?'<button class="p" id="tkNew">➕ New task</button>':'')+
       '<button class="g" id="tkPrint">🖨 Print</button>'+
@@ -50918,6 +51002,12 @@ function cosTaskTab(body){
     '</div><div class="cos-cb">'+
       '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(135px,1fr));margin-bottom:12px">'+
         '<div><label class="fl">Search</label><input id="tfQ" placeholder="work, location, note…" value="'+E(TF.q)+'"></div>'+
+        '<div><label class="fl">Source</label><select id="tfSrc">'+
+          '<option value="">Everything</option>'+
+          '<option value="task"'+(TF.src==='task'?' selected':'')+'>Tasks only</option>'+
+          '<option value="mom"'+(TF.src==='mom'?' selected':'')+'>MOM points</option>'+
+          '<option value="daily"'+(TF.src==='daily'?' selected':'')+'>Daily work to do</option>'+
+        '</select></div>'+
         '<div><label class="fl">Project</label><select id="tfP">'+selOpts(cosProjects(),TF.proj,'All projects')+'</select></div>'+
         '<div><label class="fl">POC</label><select id="tfC">'+selOpts(COS.lists.poc,TF.poc,'Anyone')+'</select></div>'+
         '<div><label class="fl">Status</label><select id="tfS">'+
@@ -50931,43 +51021,59 @@ function cosTaskTab(body){
       '</div>'+
       '<div id="tkForm"></div>'+
       '<div class="cos-tw"><table class="cos-t"><thead><tr>'+
+        '<th style="width:74px">Source</th>'+
         '<th style="width:44px">S.#</th><th style="width:88px">Date</th><th style="width:130px">Project</th>'+
         '<th>Detail of Work / Activity</th><th style="width:110px">Location</th><th style="width:100px">POC</th>'+
         '<th style="width:92px">Target</th><th style="width:80px">Priority</th>'+
-        '<th style="width:230px">Latest update</th><th style="width:105px">Status</th><th style="width:96px"></th>'+
+        '<th style="width:215px">Latest update</th><th style="width:105px">Status</th><th style="width:96px"></th>'+
       '</tr></thead><tbody>'+
-      (list.length?list.map(function(t){
-        var lu=lastUpd(t), fl=taskDue(t);
-        return '<tr data-tr="'+E(t.id)+'">'+
-          '<td>'+E(t.sno||'')+'</td>'+
-          '<td>'+E(dShort(t.date))+'</td>'+
-          '<td>'+E(t.project||'—')+'</td>'+
-          '<td style="min-width:240px"><div style="font-weight:600;color:#12283f;white-space:pre-wrap">'+E(t.detail||'')+'</div>'+
-            (t.remarks?('<div style="font-size:.71rem;color:#6d8199;margin-top:3px;white-space:pre-wrap">'+E(t.remarks)+'</div>'):'')+'</td>'+
-          '<td>'+E(t.location||'—')+'</td>'+
-          '<td>'+E(t.poc||'—')+'</td>'+
-          '<td>'+E(dShort(t.target))+(fl?('<br>'+pill(fl)):'')+'</td>'+
-          '<td>'+pill(t.priority||'Normal')+'</td>'+
-          '<td>'+(lu?('<div style="white-space:pre-wrap">'+E(lu.t)+'</div><div style="font-size:.68rem;color:#8798ab;margin-top:2px">'+E(dShort(lu.d))+' · '+E(lu.by||'')+((t.updates||[]).length>1?(' · '+(t.updates.length)+' updates'):'')+'</div>'):'<span style="color:#aab7c5">—</span>')+'</td>'+
-          '<td>'+pill(t.status||'Open')+'</td>'+
+      (list.length?list.map(function(r){
+        var lu=r.lu, fl=r.flag;
+        return '<tr data-tr="'+E(r.id)+'">'+
+          '<td>'+srcChip(r.src)+'</td>'+
+          '<td>'+E(r.sno||'—')+'</td>'+
+          '<td>'+E(dShort(r.date))+'</td>'+
+          '<td>'+E(r.project||'—')+'</td>'+
+          '<td style="min-width:240px"><div style="font-weight:600;color:#12283f;white-space:pre-wrap">'+E(r.detail||'')+'</div>'+
+            (r.sub?('<div style="font-size:.71rem;color:#6d8199;margin-top:3px;white-space:pre-wrap">'+E(r.sub)+'</div>'):'')+
+            (r.ref&&r.src!=='task'?('<div style="font-size:.68rem;color:#8798ab;margin-top:2px">'+E(r.ref)+'</div>'):'')+'</td>'+
+          '<td>'+E(r.location||'—')+'</td>'+
+          '<td>'+E(r.poc||'—')+'</td>'+
+          '<td>'+E(r.target?dShort(r.target):(r.targetTxt||'—'))+(fl?('<br>'+pill(fl)):'')+'</td>'+
+          '<td>'+pill(r.priority||'Normal')+'</td>'+
+          '<td>'+(lu?('<div style="white-space:pre-wrap">'+E(lu.t)+'</div><div style="font-size:.68rem;color:#8798ab;margin-top:2px">'+E(dShort(lu.d))+' · '+E(lu.by||'')+(r.nUpd>1?(' · '+r.nUpd+' updates'):'')+'</div>'):'<span style="color:#aab7c5">—</span>')+'</td>'+
+          '<td>'+pill(r.status||'Open')+'</td>'+
           '<td style="white-space:nowrap;text-align:right">'+
-            (cosCanEdit()?'<button class="g" data-tu="'+E(t.id)+'" title="Add an update">💬</button> <button class="g" data-te="'+E(t.id)+'" title="Edit">✎</button>':'')+
-            (cosCanDel()?' <button class="d" data-td="'+E(t.id)+'" title="Delete">✕</button>':'')+
+            (r.src==='task'
+              ? ((cosCanEdit()?'<button class="g" data-tu="'+E(r.id)+'" title="Add an update">💬</button> <button class="g" data-te="'+E(r.id)+'" title="Edit">✎</button>':'')+
+                 (cosCanDel()?' <button class="d" data-td="'+E(r.id)+'" title="Delete">✕</button>':''))
+              : '<button class="g" data-tgo="'+E(r.src)+'|'+E(r.id)+'" title="Open where it lives">📖</button>')+
           '</td></tr>';
-      }).join(''):'<tr><td colspan="11" class="empty">Nothing here yet'+(TF.q||TF.proj||TF.poc||TF.stat||TF.prio||TF.from||TF.to?' for this filter':'')+'.</td></tr>')+
+      }).join(''):'<tr><td colspan="12" class="empty">Nothing here yet'+(TF.q||TF.proj||TF.poc||TF.stat||TF.prio||TF.from||TF.to||TF.src?' for this filter':'')+'.</td></tr>')+
       '</tbody></table></div>'+
-      '<div style="font-size:.72rem;color:#6d8199;margin-top:9px">'+list.length+' of '+all.length+' task'+(all.length===1?'':'s')+' shown.</div>'+
+      '<div style="font-size:.72rem;color:#6d8199;margin-top:9px">'+list.length+' of '+all.length+' line'+(all.length===1?'':'s')+' shown — tasks, MOM points and the daily work list together.</div>'+
     '</div></div>';
 
   var B=function(id){ return body.querySelector(id); };
   var bind=function(id,key,ev){ var el=B(id); if(!el)return;
     el.addEventListener(ev||'change',function(){ TF[key]=el.value; cosPaint(); }); };
-  bind('#tfP','proj'); bind('#tfC','poc'); bind('#tfS','stat'); bind('#tfR','prio');
+  bind('#tfP','proj'); bind('#tfC','poc'); bind('#tfS','stat'); bind('#tfR','prio'); bind('#tfSrc','src');
   bind('#tfF','from'); bind('#tfT','to');
   var q=B('#tfQ');
   if(q){ var qt=null; q.addEventListener('input',function(){ clearTimeout(qt); qt=setTimeout(function(){
     TF.q=q.value; cosPaint(); var n=document.querySelector('#tfQ'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } },260); }); }
   if(B('#tkNew'))B('#tkNew').onclick=function(){ taskForm(null); };
+  /* a MOM point or a daily line opens where it belongs */
+  body.querySelectorAll('[data-tgo]').forEach(function(b2){ b2.onclick=function(){
+    var pr=String(b2.dataset.tgo).split('|');
+    if(pr[0]==='mom'){ MF.open=pr[1]; MF.sub='view'; MF.viewOne=1; COS_TAB='mom'; }
+    else {
+      var r=(COS.dwt||[]).find(function(x){ return x.id===pr[1]; });
+      if(r)DW.d=r.d; COS_TAB='dwt';
+    }
+    cosPaint();
+    try{ document.getElementById('cosOv').scrollTop=0; }catch(e){}
+  }; });
   body.querySelectorAll('[data-te]').forEach(function(b){ b.onclick=function(){ taskForm(b.dataset.te); }; });
   body.querySelectorAll('[data-tu]').forEach(function(b){ b.onclick=function(){ taskUpdate(b.dataset.tu); }; });
   body.querySelectorAll('[data-td]').forEach(function(b){ b.onclick=function(){
@@ -50982,11 +51088,13 @@ function cosTaskTab(body){
   B('#tkPrint').onclick=function(){ taskPrint(list); };
   B('#tkCsv').onclick=function(){
     cosCsv('COS_Tasks_'+today()+'.csv',
-      ['S.#','Date','Project','Detail of Work / Activity','Location','POC / Responsible','Target Date','Priority','Updates','Latest update','Status','Remarks'],
-      list.map(function(t){ var lu=lastUpd(t);
-        return [t.sno||'',t.date||'',t.project||'',t.detail||'',t.location||'',t.poc||'',t.target||'',t.priority||'',
-                (t.updates||[]).map(function(u){ return dShort(u.d)+': '+u.t; }).join(' | '),
-                lu?lu.t:'',t.status||'',t.remarks||''];
+      ['Source','S.#','Date','Project','Detail of Work / Activity','Location','POC / Responsible','Target Date','Priority','Updates','Latest update','Status','Remarks'],
+      list.map(function(r){
+        var t=(r.src==='task')?r.raw:null, lu=r.lu;
+        return [r.kind,r.sno||'',r.date||'',r.project||'',r.detail||'',r.location||'',r.poc||'',
+                r.target||r.targetTxt||'',r.priority||'',
+                t?((t.updates||[]).map(function(u){ return dShort(u.d)+': '+u.t; }).join(' | ')):'',
+                lu?lu.t:'',r.status||'',[r.sub,r.ref].filter(Boolean).join(' \u00b7 ')];
       }));
   };
 }
@@ -51098,20 +51206,21 @@ function taskUpdate(id,onDone){
 }
 
 function taskPrint(list){
-  var rows=list.map(function(t){ var lu=lastUpd(t);
-    return '<tr><td>'+E(t.sno||'')+'</td><td>'+E(dShort(t.date))+'</td><td>'+E(t.project||'')+'</td>'+
-      '<td>'+E(t.detail||'')+(t.remarks?('<br><i style="color:#6d8199">'+E(t.remarks)+'</i>'):'')+'</td>'+
-      '<td>'+E(t.location||'')+'</td><td>'+E(t.poc||'')+'</td><td>'+E(dShort(t.target))+'</td>'+
-      '<td>'+E(t.priority||'')+'</td>'+
+  var rows=list.map(function(r){ var lu=r.lu;
+    return '<tr><td>'+E(r.kind||'')+'</td><td>'+E(r.sno||'')+'</td><td>'+E(dShort(r.date))+'</td><td>'+E(r.project||'')+'</td>'+
+      '<td>'+E(r.detail||'')+(r.sub?('<br><i style="color:#6d8199">'+E(r.sub)+'</i>'):'')+'</td>'+
+      '<td>'+E(r.location||'')+'</td><td>'+E(r.poc||'')+'</td>'+
+      '<td>'+E(r.target?dShort(r.target):(r.targetTxt||''))+'</td>'+
+      '<td>'+E(r.priority||'')+'</td>'+
       '<td>'+(lu?(E(lu.t)+'<br><span style="color:#8798ab;font-size:9px">'+E(dShort(lu.d))+'</span>'):'')+'</td>'+
-      '<td>'+E(t.status||'')+'</td></tr>';
+      '<td>'+E(r.status||'')+'</td></tr>';
   }).join('');
-  cosPrint('COS Data — Tasks',
-    '<table><thead><tr><th style="width:26px">S.#</th><th style="width:56px">Date</th><th style="width:78px">Project</th>'+
+  cosPrint('COS Data — Tasks, MOM points and the daily work list',
+    '<table><thead><tr><th style="width:44px">Source</th><th style="width:26px">S.#</th><th style="width:56px">Date</th><th style="width:78px">Project</th>'+
     '<th>Detail of Work / Activity</th><th style="width:66px">Location</th><th style="width:60px">POC</th>'+
-    '<th style="width:56px">Target</th><th style="width:50px">Priority</th><th style="width:150px">Latest update</th>'+
+    '<th style="width:56px">Target</th><th style="width:50px">Priority</th><th style="width:140px">Latest update</th>'+
     '<th style="width:58px">Status</th></tr></thead><tbody>'+
-    (rows||'<tr><td colspan="10" style="text-align:center;color:#8798ab">No tasks</td></tr>')+'</tbody></table>'+
+    (rows||'<tr><td colspan="11" style="text-align:center;color:#8798ab">Nothing on record</td></tr>')+'</tbody></table>'+
     '<div class="sig"><div>Prepared by</div><div>Checked by</div><div>Approved by</div></div>',true);
 }
 
@@ -51144,45 +51253,147 @@ function cdBuckets(){
   Object.keys(out).forEach(function(k){ out[k].sort(byP); });
   return out;
 }
-function cdCard(t){
+/* ---------- MOM action points land here by their Target Date ---------- */
+function cdMomItems(D){
+  var out={due:[],late:[],soon:[]};
+  (COS.mom||[]).forEach(function(m){
+    if(m._del)return;
+    var projs=(typeof momProjs==='function')?momProjs(m):(m.project?[m.project]:[]);
+    if(CD.proj&&projs.indexOf(CD.proj)<0)return;
+    (m.points||[]).forEach(function(p0){
+      var p=(typeof momPt==='function')?momPt(p0):p0;
+      if(!String(p.agenda||'').trim()&&!String(p.action||'').trim())return;
+      if(p.status==='Closed'||p.status==='Completed'||p.status==='Cancelled')return;
+      if(CD.poc&&String(p.by||'')!==CD.poc)return;
+      var iso=(typeof momDate==='function')?momDate(p.due):'';
+      if(!iso)return;                                   /* "Immediate", "3 times/month" — no day to sit on */
+      var x={m:m,p:p,iso:iso,projs:projs};
+      if(iso<D)out.late.push(x);
+      else if(iso===D)out.due.push(x);
+    });
+  });
+  var by=function(a,b){ return String(a.iso).localeCompare(String(b.iso))||
+      String(a.m.ref||'').localeCompare(String(b.m.ref||'')); };
+  out.due.sort(by); out.late.sort(by);
+  return out;
+}
+/* the day's own Daily Work To Do lines */
+function cdDailyItems(D){
+  var out=[];
+  (COS.dwt||[]).forEach(function(r){
+    if(r._del||r.d!==D)return;
+    if(!String(r.work||'').trim())return;
+    if(CD.proj&&String(r.proj||'')!==CD.proj)return;
+    if(CD.poc&&String(r.by||'')!==CD.poc)return;
+    out.push(r);
+  });
+  return out;
+}
+function cdDailyRow(r){
+  var done=(r.status==='Done'||r.status==='Cancelled');
+  return '<tr>'+
+    '<td>'+cdChip('daily')+'</td>'+
+    '<td style="white-space:nowrap">'+(r.raised&&r.raised!==r.d
+        ? ('<span style="font-size:.68rem;color:#8a5b12;font-weight:700">carried<div>'+E(dShort(r.raised))+'</div></span>')
+        : '<span style="font-size:.68rem;color:#8798ab">new today</span>')+'</td>'+
+    '<td>'+E(r.proj||'\u2014')+'</td>'+
+    '<td style="min-width:240px"><div style="font-weight:600;color:#12283f;white-space:pre-wrap">'+E(r.work||'')+'</div>'+
+      (r.note?('<div style="font-size:.71rem;color:#6d8199;margin-top:2px;white-space:pre-wrap">'+E(r.note)+'</div>'):'')+'</td>'+
+    '<td>\u2014</td>'+
+    '<td>'+E(r.by||'\u2014')+'</td>'+
+    '<td style="white-space:nowrap">'+E(dShort(r.d))+'</td>'+
+    '<td>'+pill(r.status||'Open')+'</td>'+
+    '<td style="white-space:nowrap;text-align:right">'+
+      (cosCanEdit()?('<button class="g" data-cddg="'+E(r.id)+'" title="Open the daily sheet">\uD83D\uDCD6</button> '+
+        (done?'':'<button class="g" data-cddd="'+E(r.id)+'" title="Mark done" style="background:#e8f7ed;border-color:#c6e8d3;color:#1c7a42">\u2714</button>')):'')+
+    '</td></tr>';
+}
+/* one row of the day's table — a MOM action point */
+function cdMomRow(x){
+  var p=x.p, m=x.m, D=cdDay();
+  var days=(x.iso<D)?daysBetween(x.iso,D):0;
+  return '<tr>'+
+    '<td>'+cdChip('mom')+'</td>'+
+    '<td style="white-space:nowrap"><b>'+E(m.ref||'MOM')+'</b>'+
+      '<div style="font-size:.68rem;color:#8798ab">'+E(dShort(m.date))+'</div></td>'+
+    '<td>'+E(x.projs.join(', ')||'\u2014')+'</td>'+
+    '<td style="min-width:240px"><div style="font-weight:600;color:#12283f;white-space:pre-wrap">'+E(p.action||p.agenda||'')+'</div>'+
+      (p.action&&p.agenda?('<div style="font-size:.71rem;color:#6d8199;margin-top:2px;white-space:pre-wrap">'+E(p.agenda)+'</div>'):'')+
+      (p.rem?('<div style="font-size:.69rem;color:#8798ab;margin-top:2px;white-space:pre-wrap">'+E(p.rem)+'</div>'):'')+'</td>'+
+    '<td>'+E(m.venue||'\u2014')+'</td>'+
+    '<td>'+E(p.by||'\u2014')+'</td>'+
+    '<td style="white-space:nowrap">'+E(p.due||dShort(x.iso))+
+      (days?('<div style="font-size:.68rem;color:#b02a2a;font-weight:700">'+days+' day'+(days===1?'':'s')+' late</div>'):'')+'</td>'+
+    '<td>'+pill(p.status||'Open')+'</td>'+
+    '<td style="white-space:nowrap;text-align:right">'+
+      (cosCanEdit()?(
+        '<button class="g" data-cdmv="'+E(m.id)+'" title="Open the MOM">\uD83D\uDCD6</button> '+
+        (m.locked?'':('<button class="g" data-cdmr="'+E(m.id)+'|'+E(p.id)+'" title="Move the target date">\uD83D\uDCC5</button> '+
+                      '<button class="g" data-cdmt="'+E(m.id)+'|'+E(p.id)+'" title="Make it a task">\u2795</button> '+
+                      '<button class="g" data-cdmd="'+E(m.id)+'|'+E(p.id)+'" title="Mark done" style="background:#e8f7ed;border-color:#c6e8d3;color:#1c7a42">\u2714</button>'))+
+        (m.locked?'<span style="font-size:.68rem;color:#8a5b12">\uD83D\uDD12</span>':'')
+      ):'')+
+    '</td></tr>';
+}
+/* one row of the day's table — a task from the register */
+function cdRow(t){
   var lu=lastUpd(t), D=cdDay();
   var mine=(t.updates||[]).filter(function(u){ return u.d===D; });
-  return '<div style="border:1px solid #e3eaf2;border-left:4px solid '+
-      (t.priority==='Critical'?'#b02a2a':(t.priority==='High'?'#d99a2b':'#2c6fa8'))+
-      ';border-radius:11px;padding:10px 12px;background:#fff;margin-bottom:9px">'+
-    '<div style="display:flex;gap:9px;align-items:flex-start;flex-wrap:wrap">'+
-      '<div style="flex:1;min-width:220px">'+
-        '<div style="font-weight:700;color:#12283f;font-size:.82rem;white-space:pre-wrap">'+E(t.detail||'')+'</div>'+
-        '<div style="font-size:.71rem;color:#6d8199;margin-top:4px">S.# '+E(t.sno||'')+
-          ' · '+E(t.project||'—')+(t.location?(' · '+E(t.location)):'')+
-          (t.poc?(' · 👤 '+E(t.poc)):'')+
-          (t.target?(' · target '+E(dShort(t.target))):'')+'</div>'+
-      '</div>'+
-      '<div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">'+
-        pill(t.priority||'Normal')+pill(t.status||'Open')+
-        (taskDue(t)?pill(taskDue(t)):'')+
-      '</div>'+
-    '</div>'+
-    (mine.length?('<div style="margin-top:8px;background:#f4faf6;border:1px solid #dcefe3;border-radius:8px;padding:7px 9px;font-size:.75rem;white-space:pre-wrap">'+
-        mine.map(function(u){ return E(u.t)+(u.by?('<span style="color:#8798ab;font-size:.68rem"> — '+E(u.by)+'</span>'):''); }).join('<br>')+
-      '</div>'):
-     (lu?('<div style="margin-top:7px;font-size:.72rem;color:#8798ab;white-space:pre-wrap">last: '+E(lu.t)+' ('+E(dShort(lu.d))+')</div>'):''))+
-    (cosCanEdit()?('<div style="display:flex;gap:6px;margin-top:9px;flex-wrap:wrap">'+
-      '<button class="g" data-cdu="'+E(t.id)+'">💬 Today’s update</button>'+
-      '<button class="g" data-cds="'+E(t.id)+'" data-v="In Progress">▶ In progress</button>'+
-      '<button class="g" data-cds="'+E(t.id)+'" data-v="On Hold">⏸ On hold</button>'+
-      '<button class="g" data-cds="'+E(t.id)+'" data-v="Completed" style="background:#e8f7ed;border-color:#c6e8d3;color:#1c7a42">✔ Completed</button>'+
-    '</div>'):'')+
-  '</div>';
+  return '<tr>'+
+    '<td>'+cdChip('task')+'</td>'+
+    '<td style="white-space:nowrap"><b>'+E(t.sno||'')+'</b>'+
+      '<div style="font-size:.68rem;color:#8798ab">'+E(dShort(t.date))+'</div></td>'+
+    '<td>'+E(t.project||'\u2014')+'</td>'+
+    '<td style="min-width:240px"><div style="font-weight:600;color:#12283f;white-space:pre-wrap">'+E(t.detail||'')+'</div>'+
+      (t.remarks?('<div style="font-size:.71rem;color:#6d8199;margin-top:2px;white-space:pre-wrap">'+E(t.remarks)+'</div>'):'')+
+      (mine.length?('<div style="margin-top:4px;background:#f4faf6;border:1px solid #dcefe3;border-radius:7px;padding:4px 7px;font-size:.71rem;white-space:pre-wrap">'+
+        mine.map(function(u){ return E(u.t)+(u.by?('<span style="color:#8798ab"> \u2014 '+E(u.by)+'</span>'):''); }).join('<br>')+'</div>'):'')+'</td>'+
+    '<td>'+E(t.location||'\u2014')+'</td>'+
+    '<td>'+E(t.poc||'\u2014')+'</td>'+
+    '<td style="white-space:nowrap">'+E(t.target?dShort(t.target):'\u2014')+
+      (taskDue(t)?('<div>'+pill(taskDue(t))+'</div>'):'')+'</td>'+
+    '<td>'+pill(t.priority||'Normal')+pill(t.status||'Open')+
+      (lu&&!mine.length?('<div style="font-size:.68rem;color:#8798ab;margin-top:2px;white-space:pre-wrap">last: '+E(lu.t)+'</div>'):'')+'</td>'+
+    '<td style="white-space:nowrap;text-align:right">'+
+      (cosCanEdit()?(
+        '<button class="g" data-cdu="'+E(t.id)+'" title="Today\u2019s update">\uD83D\uDCAC</button> '+
+        '<button class="g" data-cds="'+E(t.id)+'" data-v="In Progress" title="In progress">\u25B6</button> '+
+        '<button class="g" data-cds="'+E(t.id)+'" data-v="On Hold" title="On hold">\u23F8</button> '+
+        '<button class="g" data-cds="'+E(t.id)+'" data-v="Completed" title="Completed" style="background:#e8f7ed;border-color:#c6e8d3;color:#1c7a42">\u2714</button>'
+      ):'')+
+    '</td></tr>';
 }
-function cdBlock(title,icon,list,colour,note){
+function cdChip(src){
+  var m={task:['#e8f1fb','#1d5a8f','\u2705 Task'],mom:['#f2eefc','#5b47a0','\uD83D\uDCDD MOM'],
+         daily:['#fff4e0','#9a6410','\uD83D\uDDD3 Daily']};
+  var c=m[src]||m.task;
+  return '<span style="background:'+c[0]+';color:'+c[1]+';border-radius:7px;padding:2px 7px;'+
+    'font-size:.66rem;font-weight:800;white-space:nowrap">'+c[2]+'</span>';
+}
+function cdBlock(title,icon,list,colour,note,moms,days){
+  moms=moms||[]; days=days||[];
+  var n=list.length+moms.length+days.length;
   return '<div class="cos-card"><div class="cos-ch" style="border-left:4px solid '+colour+'">'+
-    '<h3>'+icon+' '+E(title)+'</h3><span class="hint">'+list.length+(note?(' · '+E(note)):'')+'</span></div>'+
-    '<div class="cos-cb">'+(list.length?list.map(cdCard).join(''):'<div class="empty">Nothing here for this day.</div>')+'</div></div>';
+    '<h3>'+icon+' '+E(title)+'</h3><span class="hint">'+n+(note?(' \u00b7 '+E(note)):'')+
+      (moms.length?(' \u00b7 '+moms.length+' from MOM'):'')+
+      (days.length?(' \u00b7 '+days.length+' from the daily list'):'')+'</span></div>'+
+    '<div class="cos-cb">'+
+      (n?('<div class="cos-tw"><table class="cos-t"><thead><tr>'+
+            '<th style="width:74px">Source</th><th style="width:78px">S.# / Ref</th>'+
+            '<th style="width:120px">Project</th><th>Detail of Work / Activity</th>'+
+            '<th style="width:100px">Location</th><th style="width:95px">POC</th>'+
+            '<th style="width:96px">Target</th><th style="width:110px">Status</th>'+
+            '<th style="width:120px"></th></tr></thead><tbody>'+
+            moms.map(cdMomRow).join('')+days.map(cdDailyRow).join('')+list.map(cdRow).join('')+
+          '</tbody></table></div>')
+        :'<div class="empty">Nothing here for this day.</div>')+
+    '</div></div>';
 }
 function cosTodayTab(body){
-  var D=cdDay(), B=cdBuckets();
-  var openN=B.due.length+B.late.length+B.today.length+B.moved.length;
+  var D=cdDay(), B=cdBuckets(), M=cdMomItems(D), DL=cdDailyItems(D);
+  var dlOpen=DL.filter(function(r){ return r.status!=='Done'&&r.status!=='Cancelled'; });
+  var dlShut=DL.filter(function(r){ return r.status==='Done'||r.status==='Cancelled'; });
+  var openN=B.due.length+B.late.length+B.today.length+B.moved.length+M.due.length+M.late.length+dlOpen.length;
   body.innerHTML=
     '<div class="cos-card"><div class="cos-ch">'+
       '<h3>📅 '+E(dLong(D))+'</h3><span class="hint">the day’s board — all projects</span>'+
@@ -51199,18 +51410,20 @@ function cosTodayTab(body){
         '<div><label class="fl">POC / Responsible</label><select id="cdC">'+selOpts(COS.lists.poc,CD.poc,'Everyone')+'</select></div>'+
       '</div>'+
       '<div class="kpi" style="margin:13px 0 0">'+
-        '<div class="b" style="border-left-color:#b02a2a"><div class="n">'+B.late.length+'</div><div class="l">Overdue</div></div>'+
-        '<div class="b" style="border-left-color:#d99a2b"><div class="n">'+B.due.length+'</div><div class="l">Due this day</div></div>'+
+        '<div class="b" style="border-left-color:#b02a2a"><div class="n">'+(B.late.length+M.late.length)+'</div><div class="l">Overdue</div></div>'+
+        '<div class="b" style="border-left-color:#d99a2b"><div class="n">'+(B.due.length+M.due.length+dlOpen.length)+'</div><div class="l">Due this day</div></div>'+
+        '<div class="b" style="border-left-color:#5b47a0"><div class="n">'+(M.due.length+M.late.length)+'</div><div class="l">From MOM</div></div>'+
+        '<div class="b" style="border-left-color:#9a6410"><div class="n">'+DL.length+'</div><div class="l">Daily work list</div></div>'+
         '<div class="b"><div class="n">'+B.today.length+'</div><div class="l">Opened this day</div></div>'+
         '<div class="b" style="border-left-color:#1c7a42"><div class="n">'+B.done.length+'</div><div class="l">Closed this day</div></div>'+
       '</div>'+
       '<div id="cdForm" style="margin-top:12px"></div>'+
     '</div></div>'+
-    cdBlock('Overdue — carried from before','🔴',B.late,'#b02a2a','past their target date')+
-    cdBlock('Due today','🟠',B.due,'#d99a2b','target date is this day')+
+    cdBlock('Overdue — carried from before','🔴',B.late,'#b02a2a','past their target date',M.late)+
+    cdBlock('Due today','🟠',B.due,'#d99a2b','target date is this day',M.due,dlOpen)+
     cdBlock('Opened today','🔵',B.today,'#2c6fa8','raised on this day')+
     cdBlock('Touched today','✍️',B.moved,'#5b47a0','updated on this day')+
-    cdBlock('Closed today','🟢',B.done,'#1c7a42','finished or cancelled')+
+    cdBlock('Closed today','🟢',B.done,'#1c7a42','finished or cancelled',null,dlShut)+
     (openN?'':'<div class="empty" style="background:#fff;border:1px solid #dbe3ec;border-radius:14px">Nothing open for '+E(dShort(D))+'.</div>');
 
   var q=function(s){ return body.querySelector(s); };
@@ -51260,6 +51473,70 @@ function cosTodayTab(body){
     t.updates.push({d:D,t:'Status → '+b.dataset.v,by:(COSU&&COSU.name)||''});
     cosSave(); cosPaint();
   }; });
+  /* the MOM cards on this board */
+  var momOf=function(key){
+    var pr=String(key||'').split('|');
+    var m=(COS.mom||[]).find(function(x){ return x.id===pr[0]; }); if(!m)return null;
+    var p=(m.points||[]).find(function(x){ return x.id===pr[1]; });
+    return p?{m:m,p:p}:null;
+  };
+  body.querySelectorAll('[data-cdmv]').forEach(function(b){ b.onclick=function(){
+    MF.open=b.dataset.cdmv; MF.sub='view'; MF.viewOne=1; COS_TAB='mom'; cosPaint();
+    try{ document.getElementById('cosOv').scrollTop=0; }catch(e){}
+  }; });
+  body.querySelectorAll('[data-cdmd]').forEach(function(b){ b.onclick=function(){
+    if(!cosNeedEdit())return;
+    var o=momOf(b.dataset.cdmd); if(!o)return;
+    if(o.m.locked){ T('🔒 That MOM is locked.'); return; }
+    o.p.status='Closed';
+    o.p.rem=String(o.p.rem||'').trim();
+    o.p.rem=(o.p.rem?(o.p.rem+' · '):'')+'Done '+dShort(D)+((COSU&&COSU.name)?(' — '+COSU.name):'');
+    o.m._u=nowMs(); cosSave(); cosPaint();
+    T('✔ Point closed on '+(o.m.ref||'the MOM')+'.');
+  }; });
+  body.querySelectorAll('[data-cdmr]').forEach(function(b){ b.onclick=function(){
+    if(!cosNeedEdit())return;
+    var o=momOf(b.dataset.cdmr); if(!o)return;
+    if(o.m.locked){ T('🔒 That MOM is locked.'); return; }
+    uiPrompt('New target date for this point (dd-Mon-yy, or a word like Immediate):',o.p.due||'').then(function(v){
+      v=String(v==null?'':v).trim(); if(!v)return;
+      o.p.due=v; o.m._u=nowMs(); cosSave(); cosPaint();
+      T('Target date moved to '+v+'.');
+    });
+  }; });
+  body.querySelectorAll('[data-cdmt]').forEach(function(b){ b.onclick=function(){
+    if(!cosNeedEdit())return;
+    var o=momOf(b.dataset.cdmt); if(!o)return;
+    var iso=(typeof momDate==='function')?momDate(o.p.due):'';
+    var projs=(typeof momProjs==='function')?momProjs(o.m):[];
+    if(o.p.taskId&&(COS.tasks||[]).some(function(x){ return x.id===o.p.taskId; })){ T('This point is already a task.'); return; }
+    COS.seq.task=num(COS.seq.task)+1;
+    var t={id:uid('t_'),sno:COS.seq.task,date:D,project:projs[0]||'',
+      detail:(o.p.action||o.p.agenda||''),location:o.m.venue||'',poc:o.p.by||'',
+      target:iso||'',priority:'Normal',status:'Open',
+      remarks:'From '+(o.m.ref||'MOM')+(o.m.agenda?(' \u2014 '+o.m.agenda):''),
+      updates:[],momId:o.m.id,createdBy:(COSU&&COSU.name)||'',createdAt:nowMs(),_u:nowMs()};
+    COS.tasks.push(t);
+    o.p.taskId=t.id;
+    o.p.rem=(String(o.p.rem||'').trim()?(o.p.rem+' · '):'')+'Task '+t.sno+' raised';
+    o.m._u=nowMs();
+    cosSave(); cosPaint();
+    T('➕ Task '+t.sno+' raised from '+(o.m.ref||'the MOM')+'.');
+  }; });
+
+  body.querySelectorAll('[data-cddg]').forEach(function(b2){ b2.onclick=function(){
+    var r=(COS.dwt||[]).find(function(x){ return x.id===b2.dataset.cddg; });
+    if(r)DW.d=r.d;
+    COS_TAB='dwt'; cosPaint();
+    try{ document.getElementById('cosOv').scrollTop=0; }catch(e){}
+  }; });
+  body.querySelectorAll('[data-cddd]').forEach(function(b2){ b2.onclick=function(){
+    if(!cosNeedEdit())return;
+    var r=(COS.dwt||[]).find(function(x){ return x.id===b2.dataset.cddd; }); if(!r)return;
+    r.status='Done'; r._u=nowMs(); cosSave(); cosPaint();
+    T('\u2714 Marked done on the daily list.');
+  }; });
+
   q('#cdPrint').onclick=function(){
     var sec=function(ttl,list){
       if(!list.length)return '';
@@ -51299,7 +51576,15 @@ var MF={q:'',proj:'',open:'',sub:'entry'};
 
 var COS_CSS2=[
 '#cosOv .ms{background:#fff;border:1px solid #cfd9e4;border-radius:12px;padding:14px;overflow-x:auto}',
-'#cosOv .ms-in{min-width:760px}',
+'#cosOv .ms-in{min-width:880px}',
+/* Target Date: free text with a calendar button beside it */
+'#cosOv .duewrap{position:relative;display:flex;align-items:center;gap:4px}',
+'#cosOv .duewrap input[data-f="due"]{flex:1;min-width:0}',
+'#cosOv .duewrap .cal{flex:0 0 auto;background:#eef3f8;border:1px solid #d5dfea;border-radius:7px;',
+'  padding:4px 7px;cursor:pointer;font-size:.86rem;line-height:1}',
+'#cosOv .duewrap .cal:hover{background:#dce8f5;border-color:#2c6fa8}',
+'#cosOv .duewrap .calin{position:absolute;right:0;bottom:0;width:1px;height:1px;opacity:0;border:0;padding:0;pointer-events:none}',
+'#cosOv .ms-t textarea.rm{min-height:34px}',
 '#cosOv .ms-band{display:grid;grid-template-columns:240px 1fr 170px;border:1px solid #9bb0c4}',
 '#cosOv .ms-band>div{display:flex;align-items:center;justify-content:center;padding:9px 10px;min-height:56px}',
 '#cosOv .ms-band .l{background:#4eadde}',
@@ -51385,6 +51670,7 @@ function momPt(p){
   if(p.action==null&&p.en!=null)p.action=p.en;
   if(p.agenda==null)p.agenda='';
   if(p.action==null)p.action='';
+  if(p.rem==null)p.rem='';
   return p;
 }
 /* ---------- the saved name list (Participants) ---------- */
@@ -51468,7 +51754,7 @@ function momNew(){
   var m={id:uid('m_'),ref:momRef(),date:today(),start:'',end:'',venue:'',title:'',agenda:'',
     project:MF.proj||'',projects:MF.proj?[MF.proj]:[],chair:'',attendees:'',people:[],absentees:'',points:[],locked:0,
     createdBy:(COSU&&COSU.name)||'',createdAt:nowMs(),_u:nowMs()};
-  for(var i=0;i<5;i++)m.points.push({id:uid('p_'),agenda:'',action:'',by:'',due:'',status:'Open'});
+  for(var i=0;i<5;i++)m.points.push({id:uid('p_'),agenda:'',action:'',by:'',due:'',rem:'',status:'Open'});
   COS.mom.push(m); cosSave();
   return m;
 }
@@ -51664,12 +51950,13 @@ function momSheet(m,ed){
       '<th style="width:46px">Sr. #</th>'+
       '<th style="width:20%">Agenda / Discussion Point</th>'+
       '<th>Actions / Decisions</th>'+
-      '<th style="width:130px">Responsible</th>'+
-      '<th style="width:140px">Target Date</th>'+
+      '<th style="width:120px">Responsible</th>'+
+      '<th style="width:150px">Target Date</th>'+
+      '<th style="width:16%">Remarks</th>'+
       (ed?'<th style="width:56px"></th>':'<th style="width:80px">Status</th>')+
     '</tr></thead><tbody id="mpList">'+
       (rows.length?rows.map(function(p,i){ return momRow(p,i,ed); }).join(''):
-        (ed?'':'<tr><td colspan="6" class="empty">No point recorded.</td></tr>'))+
+        (ed?'':'<tr><td colspan="7" class="empty">No point recorded.</td></tr>'))+
     '</tbody></table>'+
     (ed?('<div style="display:flex;gap:8px;margin-top:11px;flex-wrap:wrap">'+
         '<button class="g" id="mpAdd">➕ Add row</button>'+
@@ -51691,6 +51978,7 @@ function momRow(p,i,ed){
       '<td><div class="ro ac">'+E(p.action||'')+'</div></td>'+
       '<td><div class="ro">'+E(p.by||'')+'</div></td>'+
       '<td><div class="ro">'+E(p.due||'')+'</div></td>'+
+      '<td><div class="ro">'+E(p.rem||'')+'</div></td>'+
       '<td><div class="ro">'+E(p.status||'Open')+'</div></td></tr>';
   }
   return '<tr data-pid="'+E(p.id)+'">'+
@@ -51698,7 +51986,12 @@ function momRow(p,i,ed){
     '<td><textarea data-f="agenda" placeholder="the point discussed">'+E(p.agenda||'')+'</textarea></td>'+
     '<td class="act"><textarea data-f="action" class="ac" placeholder="what was decided / who does what">'+E(p.action||'')+'</textarea></td>'+
     '<td><input data-f="by" list="cosPocL" value="'+E(p.by||'')+'" placeholder="Sheikh Waqas"></td>'+
-    '<td><input data-f="due" value="'+E(p.due||'')+'" placeholder="23-Sep / Immediate"></td>'+
+    '<td><div class="duewrap">'+
+        '<input data-f="due" value="'+E(p.due||'')+'" placeholder="23-Sep / Immediate">'+
+        '<button class="cal" data-cal="'+E(p.id)+'" title="Pick a date from the calendar">\uD83D\uDCC5</button>'+
+        '<input type="date" class="calin" data-calin="'+E(p.id)+'" tabindex="-1">'+
+      '</div></td>'+
+    '<td><textarea data-f="rem" class="rm" placeholder="remarks">'+E(p.rem||'')+'</textarea></td>'+
     '<td class="tools">'+
       '<button class="g" data-pt="'+E(p.id)+'" title="Make this a task" style="padding:3px 6px;margin-bottom:3px">➕</button>'+
       '<button class="d" data-px="'+E(p.id)+'" title="Remove the row" style="padding:3px 6px">✕</button>'+
@@ -51798,6 +52091,24 @@ function momRowWire(pane,m){
         var fit=function(){ el.style.height='auto'; el.style.height=Math.max(32,el.scrollHeight)+'px'; };
         el.addEventListener('input',fit); setTimeout(fit,0);
       }
+    });
+  });
+  /* the calendar: pick a day and it is written in as 23-Sep-26 */
+  tb.querySelectorAll('[data-cal]').forEach(function(btn){
+    var id=btn.dataset.cal;
+    var hid=tb.querySelector('[data-calin="'+id+'"]');
+    var txt=btn.parentElement.querySelector('[data-f="due"]');
+    if(!hid||!txt)return;
+    var p0=(m.points||[]).find(function(x){ return x.id===id; });
+    btn.onclick=function(e){
+      e.preventDefault();
+      try{ hid.value=momDate(txt.value)||today(); }catch(e2){}
+      try{ if(hid.showPicker)hid.showPicker(); else { hid.style.opacity='0'; hid.focus(); hid.click(); } }catch(e2){ hid.focus(); }
+    };
+    hid.addEventListener('change',function(){
+      if(!hid.value)return;
+      txt.value=dShort(hid.value);
+      if(p0){ p0.due=txt.value; m._u=nowMs(); cosSave(true); }
     });
   });
   tb.querySelectorAll('[data-px]').forEach(function(b){ b.onclick=function(){
@@ -51927,15 +52238,15 @@ function momView(pane){
     var rows=[];
     list.forEach(function(m){
       var pp=(m.points||[]).map(momPt).filter(function(p){ return p.agenda||p.action; });
-      if(!pp.length){ rows.push([m.ref||'',m.date||'',m.venue||'',m.agenda||m.title||'',m.project||'',m.chair||'',m.attendees||'','','','','','']); return; }
+      if(!pp.length){ rows.push([m.ref||'',m.date||'',m.venue||'',m.agenda||m.title||'',m.project||'',m.chair||'',m.attendees||'','','','','','','']); return; }
       pp.forEach(function(p,i){
         rows.push([m.ref||'',m.date||'',m.venue||'',m.agenda||m.title||'',m.project||'',m.chair||'',m.attendees||'',
-          i+1,p.agenda||'',p.action||'',p.by||'',p.due||'']);
+          i+1,p.agenda||'',p.action||'',p.by||'',p.due||'',p.rem||'']);
       });
     });
     cosCsv('COS_MOM_'+today()+'.csv',
       ['MOM #','Date','Locaion','Agenda','Project','Chaired by','Participants','Sr. #',
-       'Agenda / Discussion Point','Actions / Decisions','Responsible','Target Date'],rows);
+       'Agenda / Discussion Point','Actions / Decisions','Responsible','Target Date','Remarks'],rows);
   };
 }
 
@@ -51943,7 +52254,7 @@ function momView(pane){
 function momPrint(id){
   var m=(COS.mom||[]).find(function(x){ return x.id===id; }); if(!m)return;
   var logo=cosLogo();
-  var pts=(m.points||[]).map(momPt).filter(function(p){ return p.agenda||p.action||p.by||p.due; });
+  var pts=(m.points||[]).map(momPt).filter(function(p){ return p.agenda||p.action||p.by||p.due||p.rem; });
   var head=
     '<table style="border:none;margin-bottom:0"><tbody><tr>'+
       '<td style="width:33%;background:#4eadde;border:1px solid #9bb0c4;text-align:center;padding:8px">'+
@@ -51978,13 +52289,15 @@ function momPrint(id){
       '<th style="width:20%;background:#f2f2f2;color:#12283f">Agenda / Discussion Point</th>'+
       '<th style="background:#f2f2f2;color:#12283f">Actions / Decisions</th>'+
       '<th style="width:88px;background:#f2f2f2;color:#12283f">Responsible</th>'+
-      '<th style="width:96px;background:#f2f2f2;color:#12283f">Target Date</th></tr></thead><tbody>'+
+      '<th style="width:96px;background:#f2f2f2;color:#12283f">Target Date</th>'+
+      '<th style="width:15%;background:#f2f2f2;color:#12283f">Remarks</th></tr></thead><tbody>'+
     (pts.length?pts.map(function(p,i){
       return '<tr><td>'+(i+1)+'</td><td>'+E(p.agenda||'')+'</td>'+
         '<td style="color:#b02a2a">'+E(p.action||'')+'</td>'+
         '<td style="color:#b02a2a">'+E(p.by||'')+'</td>'+
-        '<td style="color:#b02a2a">'+E(p.due||'')+'</td></tr>';
-    }).join(''):'<tr><td colspan="5" style="text-align:center;color:#8798ab">No point recorded</td></tr>')+
+        '<td style="color:#b02a2a">'+E(p.due||'')+'</td>'+
+        '<td>'+E(p.rem||'')+'</td></tr>';
+    }).join(''):'<tr><td colspan="6" style="text-align:center;color:#8798ab">No point recorded</td></tr>')+
     '</tbody></table>';
   cosPrint('Minutes of Meeting'+(m.ref?(' — '+m.ref):''),head+tbl+
     '<div class="sig"><div>Minuted by</div><div>Chaired by</div><div>Circulated to</div></div>',false,true);
@@ -52030,6 +52343,7 @@ function momImpPick(aoa){
       if(c.action==null&&(/action|decision|remark|conclusion/.test(t))){ c.action=i; hits++; continue; }
       if(c.by==null&&(/responsib|assign|owner|actionby|person|concern/.test(t))){ c.by=i; hits++; continue; }
       if(c.due==null&&(/target|duedate|deadline|timeline|completion|date/.test(t))){ c.due=i; hits++; continue; }
+      if(c.rem==null&&(/remark|note|comment|status/.test(t))){ c.rem=i; hits++; continue; }
       if(c.sr==null&&(/^sr$|^srno$|^s$|^sno$|^no$|^serial$|^#$/.test(t))){ c.sr=i; continue; }
     }
     if(hits>=2&&c.agenda!=null){ hdr=r; col=c; break; }
@@ -52043,15 +52357,16 @@ function momImpPick(aoa){
     var rw=aoa[k]||[];
     if(momImpFoot(rw))break;                              /* the sheet's foot ends the table */
     var g=function(i){ return (i==null||rw[i]==null)?'':String(rw[i]).replace(/\s+$/,'').trim(); };
-    var ag=g(col.agenda), ac=g(col.action), by=g(col.by), du=momXlDate(col.due==null?'':rw[col.due]);
-    if(!ag&&!ac&&!by&&!du)continue;
+    var ag=g(col.agenda), ac=g(col.action), by=g(col.by), du=momXlDate(col.due==null?'':rw[col.due]),
+        rm=g(col.rem);
+    if(!ag&&!ac&&!by&&!du&&!rm)continue;
     if(/^(sr|s\.?\s*no|total|signature|minuted by|chaired by)\b/i.test(ag))continue;
     /* when the sheet numbers its rows, a row whose Sr # is not a number is a heading or a note */
     if(col.sr!=null){
       var sr=g(col.sr);
       if(sr&&!/^\d+(\.\d+)?$/.test(sr)&&!ac&&!by&&!du)continue;
     }
-    out.push({agenda:ag,action:ac,by:by,due:du});
+    out.push({agenda:ag,action:ac,by:by,due:du,rem:rm});
   }
   return out;
 }
@@ -52103,7 +52418,7 @@ function momImpDlg(m,pts,fname){
   ov.style.cssText='position:fixed;inset:0;z-index:2147483500;background:rgba(10,25,45,.55);display:flex;align-items:center;justify-content:center;padding:20px';
   var rows=pts.slice(0,60).map(function(p,i){
     return '<tr><td style="text-align:center;color:#6d8199">'+(i+1)+'</td><td>'+E(p.agenda)+'</td>'+
-      '<td>'+E(p.action)+'</td><td>'+E(p.by)+'</td><td>'+E(p.due)+'</td></tr>';
+      '<td>'+E(p.action)+'</td><td>'+E(p.by)+'</td><td>'+E(p.due)+'</td><td>'+E(p.rem||'')+'</td></tr>';
   }).join('');
   ov.innerHTML='<div style="background:#fff;border-radius:15px;max-width:1000px;width:100%;max-height:88vh;display:flex;flex-direction:column;'+
       'font-family:inherit;box-shadow:0 24px 60px rgba(10,25,45,.35);overflow:hidden">'+
@@ -52113,7 +52428,7 @@ function momImpDlg(m,pts,fname){
         ' read from the sheet. Only this lower table is imported — the head of the minutes (MOM #, date, venue, participants, projects) stays as you filled it.</div>'+
     '</div>'+
     '<div style="overflow:auto;padding:0 18px"><table style="width:100%;border-collapse:collapse;font-size:.79rem;margin:12px 0">'+
-      '<thead><tr>'+['Sr #','Agenda / Discussion Point','Actions / Decisions','Responsible','Target Date']
+      '<thead><tr>'+['Sr #','Agenda / Discussion Point','Actions / Decisions','Responsible','Target Date','Remarks']
         .map(function(h,i){ return '<th style="background:#12283f;color:#fff;padding:6px 9px;text-align:left;font-size:.7rem;'+
           'text-transform:uppercase;letter-spacing:.04em;position:sticky;top:0'+(i===0?';width:44px':'')+'">'+h+'</th>'; }).join('')+
       '</tr></thead><tbody>'+rows+'</tbody></table>'+
@@ -52136,7 +52451,7 @@ function momImpDlg(m,pts,fname){
   ov.addEventListener('mousedown',function(e){ if(e.target===ov)close(); });
   var apply=function(replace){
     var fresh=pts.map(function(p){
-      return {id:uid('p_'),agenda:p.agenda,action:p.action,by:p.by,due:p.due,status:'Open'};
+      return {id:uid('p_'),agenda:p.agenda,action:p.action,by:p.by,due:p.due,rem:p.rem||'',status:'Open'};
     });
     if(replace){ m.points=fresh; }
     else {
