@@ -1787,6 +1787,7 @@ function printNow(){
             <th style="width:118px">Date</th>
             <th style="width:180px">Payee Name</th>
             <th>Expense Detail</th>
+            <th style="width:92px;text-align:center" class="pty-atth noprint">Attachment</th>
             <th style="width:170px">Project Name</th>
             <th style="width:112px;text-align:right">Income</th>
             <th style="width:112px;text-align:right">Expense</th>
@@ -1874,6 +1875,7 @@ function printNow(){
               date:String(r.date||''), payee:String(r.payee||''),
               desc:String(r.desc||''), project:String(r.project||''),
               inAmt:num(r.inAmt), outAmt:num(r.outAmt),
+              att:(Array.isArray(r.att)?r.att.filter(function(a){ return a&&typeof a==='object'&&(a.url||a.data); }):[]),
               lk:r.lk?1:0};
     });
     return d;
@@ -2003,6 +2005,7 @@ function printNow(){
       '<td><input type="date" class="ptyc pty-date" value="'+esc(r.date||'')+'"'+d+'></td>'+
       '<td><select class="ptyc pty-payee"'+d+'>'+nameOpts('payee',r.payee||'')+'</select></td>'+
       '<td><input type="text" class="ptyc pty-desc" value="'+esc(r.desc||'')+'"'+d+'></td>'+
+      '<td class="pty-att noprint">'+(window.ptyAttCell?window.ptyAttCell(r):'')+'</td>'+
       '<td><select class="ptyc pty-proj"'+d+'>'+nameOpts('project',r.project||'')+'</select></td>'+
       '<td><input type="number" step="any" class="ptyc ptyc-r pty-in" value="'+(r.inAmt?r.inAmt:'')+'"'+d+'></td>'+
       '<td><input type="number" step="any" class="ptyc ptyc-r pty-out" value="'+(r.outAmt?r.outAmt:'')+'"'+d+'></td>'+
@@ -2062,7 +2065,7 @@ function printNow(){
     var i=0,o=0;
     list.forEach(function(r){ i+=num(r.inAmt); o+=num(r.outAmt); });
     var close=list.length?(bal[list[list.length-1].id]||0):0;
-    tf.innerHTML='<tr><td colspan="5"><b>Total</b> <span style="font-weight:600;color:var(--muted)">('+
+    tf.innerHTML='<tr><td colspan="6"><b>Total</b> <span style="font-weight:600;color:var(--muted)">('+
       list.length+' entr'+(list.length===1?'y':'ies')+')</span></td>'+
       '<td class="pty-r">'+money(i)+'</td><td class="pty-r">'+money(o)+'</td>'+
       '<td class="pty-r"'+(close<0?' style="color:#C0392B"':'')+'>'+money(close)+'</td>'+
@@ -7189,6 +7192,17 @@ input.bd-drop{appearance:none;-webkit-appearance:none;cursor:text;padding-right:
         <th style="text-align:right">Diff (Plant−Actual)</th><th style="text-align:right">Waste %</th><th style="text-align:right">Cumulative Plant</th><th style="text-align:right">Cumulative Actual</th>
       </tr></thead><tbody></tbody></table></div>
     </div>
+  </div>
+</section>
+
+<section class="tabpane" id="tab-ceorep">
+  <div class="card">
+    <div class="card-h"><h2>CEO Daily Report</h2><span class="hint">the one-page Executive Report &mdash; procurement, store, man power, work done and site payments, all worked out from the live records</span>
+      <span class="spacer"></span>
+      <button class="primary" id="ceoPrint" style="padding:5px 14px;font-size:.78rem">&#128424; Print</button>
+      <button class="ghost" id="ceoCsv" style="padding:5px 12px;font-size:.78rem">&#11015; CSV</button>
+    </div>
+    <div class="card-b" id="ceoBody"></div>
   </div>
 </section>
 
@@ -17689,6 +17703,7 @@ async function goTab(name){
   if(name==='dprmonth')renderDprMonth();
   if(name==='mpr')renderMPR();
   if(name==='dailyrep'&&window.renderDailyRep)renderDailyRep();
+  if(name==='ceorep'&&window.renderCeoRep)renderCeoRep();
   if(name==='setup')renderSetup();
   if(name==='exec'){ exDay=exToday(); renderExec(); }
   if(name==='report'){if(repSub==='conc')renderConcReport();else renderReport()}
@@ -43648,7 +43663,8 @@ var NAV={
     {label:'Store — Received vs Consumed', tab:'strep'},
     {label:'Efficiency Report — Execution', tab:'effrep'},
     {label:'Board Presentation (PPT)', tab:'board'},
-    {label:'Daily Dashboard Report', tab:'dailyrep'}
+    {label:'Daily Dashboard Report', tab:'dailyrep'},
+    {label:'CEO Daily Report', tab:'ceorep'}
   ]},
   targets:{subs:[
     {label:'Targets (Work Plan)', tab:'plan'},
@@ -44182,7 +44198,7 @@ var SK_ICON={
   plantconc:'🚚', rmcmat:'🧪', report:'📊', bvac:'📈', itemprog:'📶', manpow:'👷',
   matstat:'🧾', dpr:'📄', dprmulti:'🗂', dprmonth:'🗓', mpr:'📅',
   stkrep:'📚', strep:'📦', board:'🖥',
-  dailyrep:'📆',
+  dailyrep:'📆', ceorep:'📋',
   plan:'🎯', dash:'📊', bplan:'🗺',
   exec:'🏛', drwr:'📥', drwi:'📤', rfi:'❓', eest:'🧮', bwsch:'🗓', lda:'🏛',
   sir:'📝', cos:'✉', cyl:'🧪', piles:'🏗', proc:'🛒', qaqc:'🔬',
@@ -54263,6 +54279,995 @@ else setTimeout(gloBoot,400);
 setTimeout(gloBoot,1500);
 
 window.gloUser=gloUser;
+
+/* the letterhead mark, shared with the reports that need it */
+try{ window.__VCC_LOGO__=GLO_LOGO; }catch(e){}
+})();
+
+</script>
+<script id="ceoRepMod">
+/* ==================================================================
+   CEO DAILY REPORT  —  the one-page executive sheet
+   Every figure is worked out from what the application already holds:
+   Procurement (PR / PO), Manpower, BOQ progress and the
+   contractor bills. Nothing is typed in by hand.
+   ================================================================== */
+(function(){
+'use strict';
+
+function EX(s){ try{ return esc(s); }catch(e){ return String(s==null?'':s); } }
+function N(v){ var n=parseFloat(String(v==null?'':v).replace(/[, ]/g,'')); return isFinite(n)?n:0; }
+function ISO(d){ d=d||new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function dLong(s){ if(!s)return '—'; var p=String(s).split('-'); if(p.length<3)return s;
+  var d=new Date(+p[0],+p[1]-1,+p[2]); if(isNaN(d))return s;
+  return d.toLocaleDateString('en-GB',{weekday:'long',day:'2-digit',month:'long',year:'numeric'}); }
+function NUM(n){ if(n==null||!isFinite(n))return '0';
+  return Math.round(n).toLocaleString('en-US'); }
+function RS(n){ return 'Rs ' + NUM(n); }
+function PCT(n){ return (isFinite(n)?n:0).toFixed(1)+' %'; }
+function dnorm(v){
+  if(!v)return '';
+  try{ if(typeof pcDate==='function'){ var r=pcDate(v); if(r)return r; } }catch(e){}
+  var s=String(v).trim();
+  return /^\d{4}-\d{2}-\d{2}/.test(s)?s.slice(0,10):'';
+}
+function atDay(ms){ if(!ms)return ''; var d=new Date(+ms); return isNaN(d)?'':ISO(d); }
+
+var CEO={ d:'' };
+function ceoDay(){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(CEO.d||'')){
+    var e=document.getElementById('ceoDate');
+    CEO.d=(e&&/^\d{4}-\d{2}-\d{2}$/.test(e.value))?e.value:ISO(new Date());
+  }
+  return CEO.d;
+}
+
+/* ---------------- 1. PROCUREMENT ---------------- */
+function ceoProc(D){
+  var P={};
+  try{ P=(typeof procState==='function')?procState():((typeof S!=='undefined'&&S.proc)||{}); }catch(e){ P={}; }
+  var prdr=P.prdr||[], po=P.po||[];
+
+  var prTodayN={}, prTodayI=0, prAllN={}, prAllI=0;
+  prdr.forEach(function(r){
+    var d=dnorm(r.prDate||r.drDate||r.reqDate); if(!d||d>D)return;
+    var k=String(r.pr||r.dr||'').trim()||('#'+d);
+    prAllN[k]=1; prAllI++;
+    if(d===D){ prTodayN[k]=1; prTodayI++; }
+  });
+
+  var poTodayN={}, poTodayI=0, poTodayAmt=0, poAllN={}, poAllI=0, poAllAmt=0;
+  po.forEach(function(r){
+    var d=dnorm(r.poDate); if(!d||d>D)return;
+    var ka=String(r.po||'').trim()||('#'+d);
+    poAllN[ka]=1; poAllI++;
+    var aa=0; try{ aa=(typeof pcLineAmt==='function')?pcLineAmt(r):(N(r.total)||N(r.value)||N(r.qty)*N(r.rate)); }
+    catch(e){ aa=N(r.total)||N(r.value); }
+    poAllAmt+=aa;
+    if(d!==D)return;
+    var k=ka;
+    poTodayN[k]=1; poTodayI++;
+    var amt=0; try{ amt=(typeof pcLineAmt==='function')?pcLineAmt(r):(N(r.total)||N(r.value)||N(r.qty)*N(r.rate)); }
+    catch(e){ amt=N(r.total)||N(r.value); }
+    poTodayAmt+=amt;
+  });
+
+  /* PRs still waiting for a PO, in whole or in part */
+  var pendPrN={}, pendPrI=0;
+  try{
+    var F=(typeof procFlow==='function')?procFlow():{prs:[]};
+    (F.prs||[]).forEach(function(r){
+      var d=dnorm(r.prDate); if(d&&d>D)return;
+      if(r.status!=='Open PR'&&r.status!=='Partially Ordered')return;
+      pendPrN[String(r.pr||'').trim()||r.key]=1;
+      pendPrI+=(r.lines||1);
+    });
+  }catch(e){}
+
+  /* POs raised but the material has not fully come in */
+  var pendPoN={}, pendPoI=0, pendPoAmt=0, grnVal=0;
+  try{
+    var M=(typeof procMaster==='function')?procMaster():[];
+    M.forEach(function(r){
+      var gd=dnorm(r.grnDate); if(!gd||gd<=D)grnVal+=N(r.grnVal);
+      var pq=N(r.poQty); if(pq<=0)return;
+      var d=dnorm(r.poDate); if(d&&d>D)return;
+      if(N(r.recQty)>=pq-0.001)return;             /* fully received */
+      String(r.po||'').split(',').forEach(function(x){ x=x.trim(); if(x)pendPoN[x]=1; });
+      pendPoI++;
+      pendPoAmt+=N(r.poAmt);
+    });
+  }catch(e){}
+
+  return {
+    prTodayNos:Object.keys(prTodayN).length, prTodayItems:prTodayI,
+    prAllNos:Object.keys(prAllN).length,     prAllItems:prAllI,
+    prPendNos:Object.keys(pendPrN).length,   prPendItems:pendPrI,
+    poTodayNos:Object.keys(poTodayN).length, poTodayItems:poTodayI, poTodayAmt:poTodayAmt,
+    poAllNos:Object.keys(poAllN).length,     poAllItems:poAllI, poAllAmt:poAllAmt, grnVal:grnVal,
+    poPendNos:Object.keys(pendPoN).length,   poPendItems:pendPoI,   poPendAmt:pendPoAmt
+  };
+}
+
+/* ---------------- 2. STORE ---------------- */
+function ceoRate(){
+  var P={}; try{ P=(typeof procState==='function')?procState():((typeof S!=='undefined'&&S.proc)||{}); }catch(e){}
+  var m={};
+  ((P&&P.grn)||[]).forEach(function(g){
+    var k=String(g.item||'').trim().toLowerCase(); if(!k)return;
+    var q=N(g.qty), v=N(g.value)||q*N(g.rate);
+    if(!m[k])m[k]={q:0,v:0};
+    m[k].q+=q; m[k].v+=v;
+  });
+  var out={};
+  Object.keys(m).forEach(function(k){ out[k]=m[k].q?(m[k].v/m[k].q):0; });
+  return out;
+}
+function ceoStore(D){
+  var st={};
+  try{ st=(typeof storeState==='function')?storeState():((typeof S!=='undefined'&&S.store)||{}); }catch(e){ st={}; }
+  var rate=ceoRate();
+  var val=function(r){
+    var v=N(r.value); if(v)return v;
+    var q=N(r.qty), rt=N(r.rate);
+    if(rt)return q*rt;
+    return q*(rate[String(r.item||'').trim().toLowerCase()]||0);
+  };
+  var side=function(list){
+    var o={todayItems:{},allItems:{},todayVal:0,allVal:0,todayLines:0,allLines:0};
+    (list||[]).forEach(function(r){
+      var d=dnorm(r.date); if(!d||d>D)return;
+      var it=String(r.item||'').trim();
+      var v=val(r);
+      o.allVal+=v; o.allLines++;
+      if(it)o.allItems[it]=1;
+      if(d===D){ o.todayVal+=v; o.todayLines++; if(it)o.todayItems[it]=1; }
+    });
+    return {todayItems:Object.keys(o.todayItems).length, allItems:Object.keys(o.allItems).length,
+            todayVal:o.todayVal, allVal:o.allVal, todayLines:o.todayLines, allLines:o.allLines};
+  };
+  var i=side(st.in), o=side(st.out);
+  return { inn:i, out:o, balVal:i.allVal-o.allVal };
+}
+
+/* ---------------- 3. MANPOWER ---------------- */
+function ceoMp(D){
+  var d=null;
+  try{ d=(typeof S!=='undefined'&&S.days&&S.days[D])?S.days[D]:null; }catch(e){}
+  var v=0,c=0;
+  if(d){
+    try{ v=(typeof mpTotalG==='function')?mpTotalG(d,'v'):0; }catch(e){ v=0; }
+    try{ c=(typeof mpTotalG==='function')?mpTotalG(d,'c'):0; }catch(e){ c=0; }
+    if(!v&&d.manpowerV)v=Object.keys(d.manpowerV).reduce(function(s,k){ return s+N(d.manpowerV[k]); },0);
+    if(!c&&d.manpower) c=Object.keys(d.manpower ).reduce(function(s,k){ return s+N(d.manpower[k]);  },0);
+  }
+  return {vertical:v, contractor:c, total:v+c};
+}
+
+/* ---------------- 4. WORK DONE against the BOQ ---------------- */
+function ceoWork(D){
+  var boqV=0, doneV=0, doneYest=0, g={}, order=[];
+  var list=[]; try{ list=(typeof S!=='undefined'&&Array.isArray(S.boq))?S.boq:[]; }catch(e){}
+  var prev=(function(){ var p=String(D).split('-'), dt=new Date(+p[0],+p[1]-1,+p[2]); dt.setDate(dt.getDate()-1); return ISO(dt); })();
+  list.forEach(function(b){
+    var rate=N(b.rate), qty=N(b.qty);
+    boqV+=qty*rate;
+    var dq=0, pq=0;
+    try{ dq=(typeof cumQty==='function')?N(cumQty(b.id,D)):0; }catch(e){}
+    try{ pq=(typeof cumQty==='function')?N(cumQty(b.id,prev)):0; }catch(e){}
+    doneV+=dq*rate; doneYest+=pq*rate;
+    /* the same figures, kept BOQ by BOQ */
+    var k=String(b.group||'').trim()||'(no BOQ group)';
+    if(!g[k]){ g[k]={name:k, boq:0, done:0, today:0, lines:0}; order.push(k); }
+    g[k].boq+=qty*rate; g[k].done+=dq*rate; g[k].today+=Math.max(0,(dq-pq)*rate); g[k].lines++;
+  });
+  var groups=order.map(function(k){
+    var x=g[k];
+    x.bal=Math.max(0,x.boq-x.done);
+    x.pct=x.boq?(x.done/x.boq*100):0;
+    return x;
+  }).sort(function(a,b){ return b.boq-a.boq; });
+  return {boqVal:boqV, doneVal:doneV, todayVal:Math.max(0,doneV-doneYest),
+          pct:boqV?(doneV/boqV*100):0, groups:groups};
+}
+
+/* ---------------- 5. FINANCE — site payments ---------------- */
+function ceoFin(D){
+  var list=[];
+  try{ list=(typeof pbAll==='function')?pbAll():((typeof S!=='undefined'&&S.progressBills)||[]); }catch(e){ list=[]; }
+  var recToday=0, recAll=0, recTodayN=0, recAllN=0;
+  var paidToday=0, paidAll=0;
+  (list||[]).forEach(function(b){
+    if(!b)return;
+    var amt=0;
+    try{ amt=(typeof payNetOf==='function')?N(payNetOf(b)):N(b.net||b.thisReq); }catch(e){ amt=N(b.net||b.thisReq); }
+    /* received in Accounts — the day it was acknowledged, else the bill date */
+    var rd=atDay(b.wf&&b.wf.received&&b.wf.received.at) || (b.wf&&b.wf.received?dnorm(b.date):'');
+    if(rd&&rd<=D){ recAll+=amt; recAllN++; if(rd===D){ recToday+=amt; recTodayN++; } }
+    var pays=[];
+    try{ pays=(typeof payList==='function')?payList(b):(Array.isArray(b.payments)?b.payments:[]); }catch(e){ pays=[]; }
+    (pays||[]).forEach(function(p){
+      var pd=atDay(p.at)||dnorm(p.date); if(!pd||pd>D)return;
+      var pa=N(p.amount);
+      paidAll+=pa; if(pd===D)paidToday+=pa;
+    });
+  });
+  return {recToday:recToday, recAll:recAll, recTodayN:recTodayN, recAllN:recAllN,
+          paidToday:paidToday, paidAll:paidAll, balance:Math.max(0,recAll-paidAll)};
+}
+
+/* ---------------- 6. CONCRETE — poured today and up to date, grade by grade ---------------- */
+function ceoConc(D){
+  var rows=[]; try{ rows=(typeof cxRows==='function')?cxRows():[]; }catch(e){ rows=[]; }
+  var m={}, unit='';
+  rows.forEach(function(r){
+    var d=String(r.d||'').slice(0,10); if(!d||d>D)return;
+    var q=N(r.qty); if(!q)return;
+    if(!unit&&r.unit)unit=String(r.unit);
+    var k=String(r.mix||'').trim()||'(grade not set)';
+    if(!m[k])m[k]={mix:k,today:0,upto:0,trips:0,tripsToday:0};
+    m[k].upto+=q; m[k].trips++;
+    if(d===D){ m[k].today+=q; m[k].tripsToday++; }
+  });
+  var out=Object.keys(m).map(function(k){ return m[k]; });
+  out.sort(function(a,b){
+    var pa=parseFloat(String(a.mix).replace(/[^0-9.]/g,''))||0,
+        pb=parseFloat(String(b.mix).replace(/[^0-9.]/g,''))||0;
+    return pa-pb||String(a.mix).localeCompare(String(b.mix));
+  });
+  return {rows:out,
+    todayTot:out.reduce(function(s,x){ return s+x.today; },0),
+    uptoTot:out.reduce(function(s,x){ return s+x.upto; },0),
+    tripsToday:out.reduce(function(s,x){ return s+x.tripsToday; },0),
+    trips:out.reduce(function(s,x){ return s+x.trips; },0),
+    unit:/m3|cubic/i.test(unit)?'Cu.Mtr':'Cu.Mtr'};
+}
+
+/* the value measured on each of the last n days — straight off the progress sheets */
+function ceoTrend(D,n){
+  var rate={}, out=[];
+  try{ (S.boq||[]).forEach(function(b){ rate[b.id]=N(b.rate); }); }catch(e){}
+  var p=String(D).split('-'), base=new Date(+p[0],+p[1]-1,+p[2]);
+  for(var i=n-1;i>=0;i--){
+    var dt=new Date(base.getTime()); dt.setDate(dt.getDate()-i);
+    var k=ISO(dt), v=0;
+    try{
+      ((S.days&&S.days[k]&&S.days[k].progress)||[]).forEach(function(r){ v+=N(r.qty)*(rate[r.boqId]||0); });
+    }catch(e){}
+    out.push({d:k, lbl:String(dt.getDate()), v:v});
+  }
+  return out;
+}
+function ceoData(){
+  var D=ceoDay();
+  return {D:D, proc:ceoProc(D), store:ceoStore(D), mp:ceoMp(D), work:ceoWork(D), fin:ceoFin(D),
+          conc:ceoConc(D), trend:ceoTrend(D,7)};
+}
+
+
+/* ================= the sheet — one colourful A4 page ================= */
+/* Palette (checked for colour-blind separation):
+   blue #2C6FA8 · green #1F8F4E · orange #C4651E · slate #93A3B3 · navy #12283F */
+var C_BLUE='#2C6FA8', C_GREEN='#1F8F4E', C_ORANGE='#C4651E', C_SLATE='#93A3B3',
+    C_NAVY='#12283F', C_RED='#B02A2A';
+
+var CEO_CSS=[
+'.ce-sheet{background:#fff;border:1px solid #c7d4e2;border-radius:10px;overflow:hidden;max-width:1080px;margin:0 auto;',
+'  box-shadow:0 2px 14px rgba(16,36,60,.07)}',
+'.ce-top{display:flex;align-items:center;gap:16px;padding:11px 18px;',
+'  background:linear-gradient(100deg,#12283f 0%,#1d4670 58%,#2c6fa8 100%);color:#fff}',
+'.ce-top img{height:38px;width:auto;filter:brightness(0) invert(1)}',
+'.ce-ttl{flex:1;text-align:center}',
+'.ce-ttl h1{margin:0;font-size:.82rem;font-weight:800;letter-spacing:.24em;text-transform:uppercase;color:#a9c8e6}',
+'.ce-ttl .ce-proj{font-size:1.42rem;font-weight:800;color:#fff;letter-spacing:.01em;line-height:1.2;margin:2px 0 1px}',
+'.ce-ttl div{font-size:.68rem;color:#bcd4ea;letter-spacing:.03em}',
+'.ce-dt{text-align:right;font-size:.66rem;line-height:1.45;color:#a9c8e6;white-space:nowrap;text-transform:uppercase;letter-spacing:.07em}',
+'.ce-dt b{display:block;font-size:.84rem;color:#fff;font-weight:800;letter-spacing:0;text-transform:none}',
+/* KPI strip */
+'.ce-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:0;border-bottom:1px solid #d7e2ee}',
+'.ce-kpi{padding:9px 13px;border-right:1px solid #e4ebf3;border-top:3px solid #2c6fa8;background:#fbfdff}',
+'.ce-kpi:last-child{border-right:none}',
+'.ce-kpi .l{font-size:.6rem;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:#6d8199}',
+'.ce-kpi .v{font-size:1.02rem;font-weight:800;color:#12283f;line-height:1.25;margin-top:2px;font-variant-numeric:tabular-nums}',
+'.ce-kpi .s{font-size:.63rem;color:#7a8ea3;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+/* chart band */
+'.ce-charts{display:grid;grid-template-columns:1fr 1fr 1.25fr;gap:0;border-bottom:1px solid #d7e2ee;background:#f7fafd}',
+'.ce-ch{padding:9px 14px 10px;border-right:1px solid #e4ebf3}',
+'.ce-ch:last-child{border-right:none}',
+'.ce-ch h4{margin:0 0 7px;font-size:.63rem;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:#41586f}',
+'.ce-ch .row{display:flex;align-items:center;gap:10px}',
+'.ce-lg{font-size:.66rem;color:#41586f;line-height:1.65}',
+'.ce-lg>div{white-space:nowrap}',
+'.ce-lg i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:-1px}',
+'.ce-lg b{color:#12283f;font-variant-numeric:tabular-nums}',
+/* tables */
+'.ce-grid{display:grid;grid-template-columns:1fr 1fr;gap:0}',
+'.ce-col{border-right:1px solid #d7e2ee}',
+'.ce-col:last-child{border-right:none}',
+'table.ce{width:100%;border-collapse:collapse;font-size:.76rem}',
+'table.ce td{border-bottom:1px solid #e9eff6;padding:6.5px 12px;vertical-align:middle;color:#1f3247;line-height:1.45}',
+'table.ce td.h{background:#12283f;color:#fff;font-weight:800;font-size:.64rem;letter-spacing:.08em;',
+'  text-transform:uppercase;padding:7px 12px;border-bottom:none}',
+'table.ce td.h.b2{background:#1d4670}table.ce td.h.b3{background:#24557f}table.ce td.h.b4{background:#2c6fa8}',
+'table.ce td.l{color:#41586f;font-weight:600}',
+'table.ce td.v{text-align:right;font-weight:800;color:#12283f;font-variant-numeric:tabular-nums;white-space:nowrap;width:38%}',
+'table.ce td.v.g{color:#1f8f4e}table.ce td.v.o{color:#c4651e}table.ce td.v.r{color:#b02a2a}',
+'table.ce tr.alt td{background:#fafcfe}',
+'table.ce tr.tot td{background:#eef4fa;font-weight:800}',
+'table.ce tr.sub td{background:#f2f6fb;color:#41586f;font-weight:800;font-size:.66rem;',
+'  letter-spacing:.04em;text-transform:uppercase}',
+'table.ce.ce-conc td.l{width:44%}table.ce.ce-conc td.v{width:28%}',
+'table.ce.ce-boq td.l{width:34%}table.ce.ce-boq td.v{width:15.5%}',
+'table.ce.ce-boq td.l small{color:#8798ab;font-weight:600;font-size:.88em}',
+'table.ce.ce-boq td.pc{width:20%;text-align:right;white-space:nowrap}',
+'table.ce.ce-boq td.pc .pcv{font-weight:800;color:#12283f;font-variant-numeric:tabular-nums}',
+'table.ce.ce-boq td.pc .pcb{display:block;height:5px;border-radius:3px;background:#e7eef6;margin-top:3px;overflow:hidden}',
+'table.ce.ce-boq td.pc .pcb i{display:block;height:100%;background:#1f8f4e;border-radius:3px}',
+'table.ce.ce-fin td.l{width:31%}table.ce.ce-fin td.v{width:19%}',
+'.ce-sign{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid #d7e2ee;background:#fbfdff}',
+'.ce-sign div{padding:10px 12px 5px;font-size:.66rem;color:#6d8199;text-align:center;border-right:1px solid #e4ebf3}',
+'.ce-sign div:last-child{border-right:none}',
+'.ce-note{font-size:.7rem;color:var(--muted);margin:9px auto 0;max-width:1080px;line-height:1.5;',
+'  border-left:3px solid #cbd7e4;padding-left:10px}'
+].join('\n');
+function ceoCss(){
+  var el=document.getElementById('ceoCss');
+  if(!el){ el=document.createElement('style'); el.id='ceoCss'; document.head.appendChild(el); }
+  el.textContent=CEO_CSS.replace(/^\./gm,'#tab-ceorep .').replace(/^table\.ce/gm,'#tab-ceorep table.ce');
+}
+function ceoLogo(){ try{ return window.__VCC_LOGO__||''; }catch(e){ return ''; } }
+function ceoProjName(){
+  var p='';
+  try{ p=(typeof PROJ!=='undefined'&&PROJ&&PROJ.name)||''; }catch(e){}
+  if(!p){ try{ p=(S.settings&&S.settings.project)||''; }catch(e){} }
+  return p||'Project';
+}
+/* Rs in the way a board reads it: 4.28 Cr / 61.2 Lac / 8,400 */
+function F2(n){
+  if(n==null||!isFinite(n))return '\u2014';
+  return (+n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+function RSS(n){
+  var v=Math.round(N(n)), s=v<0?'-':'', a=Math.abs(v);
+  if(a>=10000000)return s+'Rs '+(a/10000000).toFixed(2)+' Cr';
+  if(a>=100000)  return s+'Rs '+(a/100000).toFixed(1)+' Lac';
+  return s+'Rs '+NUM(a);
+}
+
+/* ---------- small SVG pieces ---------- */
+function donut(pct,colA,colB,mid,sub){
+  var R=31, W=12, C=2*Math.PI*R, p=Math.max(0,Math.min(100,pct||0)), seg=C*p/100;
+  var gap=(p>1&&p<99)?3:0;
+  return '<svg width="88" height="88" viewBox="0 0 88 88" role="img">'+
+    '<g transform="translate(44,44)">'+
+      '<circle r="'+R+'" fill="none" stroke="'+colB+'" stroke-width="'+W+'"></circle>'+
+      (gap?('<circle r="'+R+'" fill="none" stroke="#fff" stroke-width="'+W+'" transform="rotate(-90)" '+
+            'stroke-dasharray="'+(seg+2*gap)+' '+Math.max(0,C-seg-2*gap)+'" stroke-dashoffset="'+gap+'"></circle>'):'')+
+      '<circle r="'+R+'" fill="none" stroke="'+colA+'" stroke-width="'+W+'" transform="rotate(-90)" '+
+        'stroke-dasharray="'+seg+' '+Math.max(0,C-seg)+'"></circle>'+
+      '<text y="2" text-anchor="middle" style="font:800 17px Segoe UI,Arial;fill:#12283f">'+EX(mid)+'</text>'+
+      (sub?('<text y="16" text-anchor="middle" style="font:600 8.5px Segoe UI,Arial;fill:#7a8ea3">'+EX(sub)+'</text>'):'')+
+    '</g></svg>';
+}
+/* horizontal bars, every bar directly labelled */
+function hbars(rows,w){
+  w=w||250;
+  var max=Math.max.apply(null,rows.map(function(r){ return Math.abs(N(r.v)); }).concat([1]));
+  var bh=13, gap=13, h=rows.length*(bh+gap);
+  var out='<svg viewBox="0 0 '+w+' '+h+'" style="width:100%;height:auto;display:block" role="img">';
+  rows.forEach(function(r,i){
+    var y=i*(bh+gap), lw=Math.max(2,(Math.abs(N(r.v))/max)*(w-2));
+    out+='<text x="0" y="'+(y+8)+'" style="font:700 8.5px Segoe UI,Arial;fill:#41586f">'+EX(r.l)+'</text>'+
+      '<text x="'+w+'" y="'+(y+8)+'" text-anchor="end" style="font:800 9px Segoe UI,Arial;fill:#12283f">'+EX(r.t)+'</text>'+
+      '<rect x="0" y="'+(y+11)+'" width="'+(w)+'" height="'+bh+'" rx="3" fill="#e7eef6"></rect>'+
+      '<rect x="0" y="'+(y+11)+'" width="'+lw+'" height="'+bh+'" rx="3" fill="'+r.c+'"></rect>';
+  });
+  return out+'</svg>';
+}
+/* one stacked bar: done vs pending, with a 2px white gap */
+function sbar(a,b,ca,cb,w){
+  w=w||250; var t=Math.max(1,a+b), aw=Math.max(0,(a/t)*(w-2));
+  return '<svg viewBox="0 0 '+w+' 13" style="width:100%;height:auto;display:block">'+
+    '<rect x="0" y="0" width="'+w+'" height="13" rx="3" fill="'+cb+'"></rect>'+
+    (a>0?('<rect x="0" y="0" width="'+aw+'" height="13" rx="3" fill="'+ca+'"></rect>'+
+          '<rect x="'+aw+'" y="0" width="2" height="13" fill="#fff"></rect>'):'')+
+    '</svg>';
+}
+/* a small column chart — one series, so no legend; only the tallest is labelled */
+function SHORT(n){
+  var v=Math.round(N(n)), a=Math.abs(v);
+  if(!a)return '\u2014';
+  if(a>=10000000)return (a/10000000).toFixed(a>=100000000?0:1)+'C';
+  if(a>=100000)  return (a/100000).toFixed(a>=1000000?0:1)+'L';
+  if(a>=1000)    return Math.round(a/1000)+'K';
+  return String(a);
+}
+function cols(list,w,h,col){
+  w=w||250; h=h||66;
+  var max=Math.max.apply(null,list.map(function(x){ return N(x.v); }).concat([1]));
+  var n=list.length, bw=Math.max(6,(w-(n-1)*5)/n), out='', PT=11, PB=12;
+  var top=list.reduce(function(a,b){ return N(b.v)>N(a.v)?b:a; },list[0]||{v:0});
+  list.forEach(function(x,i){
+    var bh=Math.max(1,(N(x.v)/max)*(h-PT-PB)), X=i*(bw+5), Y=h-PB-bh;
+    out+='<rect x="'+X.toFixed(1)+'" y="'+Y.toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+bh.toFixed(1)+'" rx="2.5" fill="'+(x===top?col:'#9dbcd8')+'"></rect>'+
+      '<text x="'+(X+bw/2).toFixed(1)+'" y="'+Math.max(7.5,Y-2.5).toFixed(1)+'" text-anchor="middle" '+
+        'style="font:800 7.2px Segoe UI,Arial;fill:'+(x===top?'#12283f':'#5b7186')+'">'+EX(SHORT(x.v))+'</text>'+
+      '<text x="'+(X+bw/2).toFixed(1)+'" y="'+(h-3)+'" text-anchor="middle" style="font:600 7.5px Segoe UI,Arial;fill:#7a8ea3">'+EX(x.lbl)+'</text>';
+  });
+  return '<svg viewBox="0 0 '+w+' '+h+'" style="width:100%;height:auto;display:block" role="img">'+out+'</svg>';
+}
+/* a % cell: the figure with a bar under it */
+function pcBar(p){
+  p=Math.max(0,Math.min(100,N(p)));
+  return '<span class="pcv">'+p.toFixed(1)+'%</span>'+
+    '<span class="pcb"><i style="width:'+p.toFixed(1)+'%"></i></span>';
+}
+function LG(c,label,val){
+  return '<div><i style="background:'+c+'"></i>'+EX(label)+(val!=null?(' &nbsp;<b>'+EX(val)+'</b>'):'')+'</div>';
+}
+
+function ceoSheetHTML(d){
+  var p=d.proc, m=d.mp, w=d.work, f=d.fin, cc=d.conc;
+  var logo=ceoLogo();
+  var bal=Math.max(0,w.boqVal-w.doneVal);
+  var prDone=Math.max(0,p.prAllNos-p.prPendNos);
+  var poDone=Math.max(0,p.poAllNos-p.poPendNos);
+
+  /* ---- header ---- */
+  var h='<div class="ce-sheet">'+
+    '<div class="ce-top">'+
+      (logo||'<div style="width:120px"></div>')+
+      '<div class="ce-ttl"><h1>Executive Report</h1>'+
+        '<div class="ce-proj">'+EX(ceoProjName())+'</div>'+
+        '<div>Daily report for the Chief Executive</div></div>'+
+      '<div class="ce-dt"><span>Report date</span><b>'+EX(dLong(d.D))+'</b></div>'+
+    '</div>'+
+
+  /* ---- 5 headline figures ---- */
+    '<div class="ce-kpis">'+
+      '<div class="ce-kpi" style="border-top-color:'+C_GREEN+'"><div class="l">Work done (BOQ)</div>'+
+        '<div class="v" style="color:'+C_GREEN+'">'+PCT(w.pct)+'</div><div class="s">'+RSS(w.doneVal)+' of '+RSS(w.boqVal).replace('Rs ','')+'</div></div>'+
+      '<div class="ce-kpi" style="border-top-color:'+C_BLUE+'"><div class="l">Man power today</div>'+
+        '<div class="v">'+NUM(m.total)+'</div><div class="s">'+NUM(m.vertical)+' vertical &middot; '+NUM(m.contractor)+' contractor</div></div>'+
+      '<div class="ce-kpi" style="border-top-color:'+C_ORANGE+'"><div class="l">Pending POs</div>'+
+        '<div class="v" style="color:'+C_ORANGE+'">'+RSS(p.poPendAmt)+'</div><div class="s">'+NUM(p.poPendNos)+' PO &middot; '+NUM(p.poPendItems)+' items</div></div>'+
+      '<div class="ce-kpi" style="border-top-color:'+C_RED+'"><div class="l">Balance to be paid</div>'+
+        '<div class="v" style="color:'+C_RED+'">'+RSS(f.balance)+'</div><div class="s">paid '+RSS(f.paidAll)+' of '+RSS(f.recAll)+'</div></div>'+
+    '</div>'+
+
+  /* ---- the three pictures ---- */
+    '<div class="ce-charts">'+
+      '<div class="ce-ch"><h4>Work done against BOQ</h4><div class="row">'+
+        donut(w.pct,C_GREEN,C_SLATE,PCT(w.pct),'done')+
+        '<div class="ce-lg">'+
+          LG(C_GREEN,'Work done',RSS(w.doneVal))+
+          LG(C_SLATE,'Balance to do',RSS(bal))+
+          '<div style="color:#7a8ea3;margin-top:2px">Today '+RSS(w.todayVal)+'</div>'+
+        '</div></div></div>'+
+
+      '<div class="ce-ch"><h4>Man power on site</h4><div class="row">'+
+        donut(m.total?(m.vertical/m.total*100):0,C_BLUE,C_ORANGE,NUM(m.total),'men')+
+        '<div class="ce-lg">'+
+          LG(C_BLUE,'Vertical',NUM(m.vertical))+
+          LG(C_ORANGE,'Contractor',NUM(m.contractor))+
+          '<div style="color:#7a8ea3;margin-top:2px">'+(m.total?((m.vertical/m.total*100).toFixed(0)+'% own'):'no entry')+'</div>'+
+        '</div></div></div>'+
+
+      '<div class="ce-ch"><h4>Site payments &mdash; Rs</h4>'+
+        hbars([
+          {l:'Bills received',v:f.recAll, t:RSS(f.recAll), c:C_BLUE},
+          {l:'Paid',          v:f.paidAll,t:RSS(f.paidAll),c:C_GREEN},
+          {l:'Balance to pay',v:f.balance,t:RSS(f.balance),c:C_RED}
+        ],290)+
+      '</div>'+
+    '</div>'+
+
+  /* ---- the figures, two columns ---- */
+    '<div class="ce-grid">'+
+      '<div class="ce-col"><table class="ce"><tbody>'+
+        '<tr><td class="h" colspan="2">Procurement Section</td></tr>'+
+        row('PR generated today (Nos / Items)',NUM(p.prTodayNos)+' / '+NUM(p.prTodayItems))+
+        row('Total PR generated (Nos / Items)',NUM(p.prAllNos)+' / '+NUM(p.prAllItems),1)+
+        row('Total pending PR (Nos / Items)',NUM(p.prPendNos)+' / '+NUM(p.prPendItems),0,'o')+
+        row('PO generated today (Nos / Items)',NUM(p.poTodayNos)+' / '+NUM(p.poTodayItems),1)+
+        row('Today PO generated (Amount)',RS(p.poTodayAmt))+
+        row('Total pending POs (Nos / Items)',NUM(p.poPendNos)+' / '+NUM(p.poPendItems),1,'o')+
+        row('Total PO value raised (up to date)',RS(p.poAllAmt))+
+        row('Material received \u2014 GRN value',RS(p.grnVal),1,'g')+
+        '<tr class="tot"><td class="l">Total pending POs amount</td><td class="v r">'+RS(p.poPendAmt)+'</td></tr>'+
+        '<tr><td colspan="2" style="padding:6px 10px 8px">'+
+          '<div style="font-size:.62rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#6d8199;margin-bottom:3px">PR covered by a PO</div>'+
+          sbar(prDone,p.prPendNos,C_GREEN,C_ORANGE,240)+
+          '<div class="ce-lg" style="display:flex;gap:14px;margin-top:2px">'+
+            LG(C_GREEN,'Ordered',NUM(prDone))+LG(C_ORANGE,'Pending',NUM(p.prPendNos))+'</div>'+
+          '<div style="font-size:.62rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#6d8199;margin:6px 0 3px">PO material received</div>'+
+          sbar(poDone,p.poPendNos,C_BLUE,C_ORANGE,240)+
+          '<div class="ce-lg" style="display:flex;gap:14px;margin-top:2px">'+
+            LG(C_BLUE,'Received',NUM(poDone))+LG(C_ORANGE,'Pending',NUM(p.poPendNos))+'</div>'+
+        '</td></tr>'+
+      '</tbody></table></div>'+
+
+      '<div class="ce-col"><table class="ce"><tbody>'+
+        '<tr><td class="h b3" colspan="2">Site Man Power</td></tr>'+
+        row('Total vertical man power',NUM(m.vertical))+
+        row('Total contractors man power',NUM(m.contractor),1)+
+        '<tr class="tot"><td class="l">Total man power on site today</td><td class="v g">'+NUM(m.total)+'</td></tr>'+
+
+        '<tr><td class="h b4" colspan="2">Total Work Done</td></tr>'+
+        row('Work done today — Rs',RS(w.todayVal),0,'g')+
+        '<tr class="tot"><td class="l">Work done up to now &middot; '+PCT(w.pct)+'</td>'+
+          '<td class="v g">'+RS(w.doneVal)+'</td></tr>'+
+      '</tbody></table>'+
+
+      /* ---- concrete, grade by grade ---- */
+      '<table class="ce ce-conc"><tbody>'+
+        '<tr><td class="h b2" colspan="3">Concrete Update &mdash; Cu.Mtr</td></tr>'+
+        '<tr class="sub"><td>Design mix (PSI)</td><td class="v">Poured today</td><td class="v">Up to date</td></tr>'+
+        (cc.rows.length
+          ? cc.rows.map(function(r,i){
+              return '<tr'+(i%2?' class="alt"':'')+'><td class="l">'+EX(r.mix)+'</td>'+
+                '<td class="v'+(r.today>0?' g':'')+'">'+(r.today>0?F2(r.today):'\u2014')+'</td>'+
+                '<td class="v">'+F2(r.upto)+'</td></tr>';
+            }).join('')
+          : '<tr><td colspan="3" style="text-align:center;color:#8798ab;padding:10px">No ready-mix pour recorded</td></tr>')+
+        '<tr class="tot"><td class="l">Total concrete poured</td>'+
+          '<td class="v'+(cc.todayTot>0?' g':'')+'">'+(cc.todayTot>0?F2(cc.todayTot):'\u2014')+'</td>'+
+          '<td class="v">'+F2(cc.uptoTot)+'</td></tr>'+
+        '<tr><td colspan="3" style="font-size:.66rem;color:#7a8ea3;padding:4px 10px 6px">'+
+          NUM(cc.tripsToday)+' pour'+(cc.tripsToday===1?'':'s')+' today &middot; '+NUM(cc.trips)+' up to date &middot; '+
+          NUM(cc.rows.length)+' grade'+(cc.rows.length===1?'':'s')+'</td></tr>'+
+        '<tr><td colspan="3" style="padding:7px 12px 9px">'+
+          '<div style="font-size:.62rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#6d8199;margin:0 0 3px">'+
+            'Work done \u2014 last 7 days (Rs) &middot; L = lac, C = crore</div>'+
+          cols(d.trend,300,54,C_GREEN)+
+          '<div class="ce-lg" style="color:#7a8ea3">Tallest column '+RSS(Math.max.apply(null,d.trend.map(function(x){return x.v;}).concat([0])))+
+            ' &middot; 7-day total '+RSS(d.trend.reduce(function(a,b){ return a+b.v; },0))+'</div>'+
+        '</td></tr>'+
+      '</tbody></table></div>'+
+    '</div>'+
+
+  /* ---- finance ---- */
+    '<table class="ce ce-fin"><tbody>'+
+      '<tr><td class="h" colspan="4">Finance Section &mdash; Site Payments</td></tr>'+
+      '<tr><td class="l">Bills received today (Amount)</td><td class="v">'+RS(f.recToday)+'</td>'+
+        '<td class="l">Paid today (Amount)</td><td class="v">'+RS(f.paidToday)+'</td></tr>'+
+      '<tr class="alt"><td class="l">Total bills received (up to now)</td><td class="v">'+RS(f.recAll)+'</td>'+
+        '<td class="l">Total paid (up to now)</td><td class="v g">'+RS(f.paidAll)+'</td></tr>'+
+      '<tr class="tot"><td class="l">Bills received (Nos) &mdash; today / total</td>'+
+        '<td class="v">'+NUM(f.recTodayN)+' / '+NUM(f.recAllN)+'</td>'+
+        '<td class="l">Total balance to be paid</td><td class="v r">'+RS(f.balance)+'</td></tr>'+
+    '</tbody></table>'+
+
+    /* ---- BOQ by BOQ ---- */
+    '<table class="ce ce-boq"><tbody>'+
+      '<tr><td class="h b4" colspan="5">Work Done &mdash; BOQ wise</td></tr>'+
+      '<tr class="sub"><td>BOQ / Section</td><td class="v">BOQ value</td><td class="v">Work done</td>'+
+        '<td class="v">Balance</td><td class="pc">% done</td></tr>'+
+      (w.groups.length?w.groups.map(function(x,i){
+        return '<tr'+(i%2?' class="alt"':'')+'><td class="l">'+EX(x.name)+
+            '<small> &middot; '+NUM(x.lines)+' item'+(x.lines===1?'':'s')+'</small></td>'+
+          '<td class="v">'+RS(x.boq)+'</td>'+
+          '<td class="v g">'+RS(x.done)+'</td>'+
+          '<td class="v'+(x.bal>0?' o':'')+'">'+RS(x.bal)+'</td>'+
+          '<td class="pc">'+pcBar(x.pct)+'</td></tr>';
+      }).join(''):'<tr><td colspan="5" style="text-align:center;color:#8798ab;padding:10px">No BOQ loaded</td></tr>')+
+      '<tr class="tot"><td class="l">All BOQs together</td>'+
+        '<td class="v">'+RS(w.boqVal)+'</td><td class="v g">'+RS(w.doneVal)+'</td>'+
+        '<td class="v o">'+RS(Math.max(0,w.boqVal-w.doneVal))+'</td>'+
+        '<td class="pc">'+pcBar(w.pct)+'</td></tr>'+
+    '</tbody></table>'+
+
+    '<div class="ce-sign"><div>Prepared by</div><div>Checked by &mdash; Project Manager</div><div>Chief Executive</div></div>'+
+    '</div>';
+  return h;
+}
+function row(l,v,alt,cls){
+  return '<tr'+(alt?' class="alt"':'')+'><td class="l">'+EX(l)+'</td><td class="v'+(cls?(' '+cls):'')+'">'+v+'</td></tr>';
+}
+
+function renderCeoRep(){
+  var host=document.getElementById('ceoBody'); if(!host)return;
+  ceoCss();
+  var d=ceoData();
+  host.innerHTML=
+    '<div class="card-reg no-print" style="border-radius:8px;border:1px solid var(--border);margin-bottom:12px;display:flex;gap:9px;align-items:center;flex-wrap:wrap">'+
+      '<span class="reg-lbl">Report date</span>'+
+      '<button class="ghost" id="ceoPrev" style="padding:4px 10px;font-size:.78rem">&#9664;</button>'+
+      '<input type="date" id="ceoDate" value="'+EX(d.D)+'" style="font-size:.82rem;padding:4px 8px;width:auto">'+
+      '<button class="ghost" id="ceoNext" style="padding:4px 10px;font-size:.78rem">&#9654;</button>'+
+      '<button class="ghost" id="ceoToday" style="padding:4px 12px;font-size:.78rem">Today</button>'+
+      '<span class="reg-note" style="margin-left:auto">one page, ready to print &mdash; every figure from the live site records</span>'+
+    '</div>'+
+    ceoSheetHTML(d)+
+    '<div class="ce-note no-print">'+
+      '<b>Where each figure comes from.</b> PR / PO and the pending figures come from the Procurement register (a PR is pending until a PO covers it in full; '+
+      'a PO is pending until the material is fully received). '+
+      'Man power is the day&rsquo;s Manpower sheet, Vertical and Contractor kept apart. Work done is BOQ Qty &times; Rate against the measured progress up to this date. '+
+      'Finance counts a bill from the day Accounts acknowledged it, and a payment from the day it was entered.'+
+    '</div>';
+
+  var g=function(id){ return document.getElementById(id); };
+  var shift=function(n){
+    var p=String(d.D).split('-'), dt=new Date(+p[0],+p[1]-1,+p[2]);
+    dt.setDate(dt.getDate()+n); CEO.d=ISO(dt); renderCeoRep();
+  };
+  g('ceoPrev').onclick=function(){ shift(-1); };
+  g('ceoNext').onclick=function(){ shift(1); };
+  g('ceoToday').onclick=function(){ CEO.d=ISO(new Date()); renderCeoRep(); };
+  g('ceoDate').addEventListener('change',function(){ CEO.d=this.value||ISO(new Date()); renderCeoRep(); });
+  var pr=document.getElementById('ceoPrint'); if(pr)pr.onclick=function(){ ceoPrint(); };
+  var cs=document.getElementById('ceoCsv');   if(cs)cs.onclick=function(){ ceoCsv(); };
+}
+
+/* ---------- print: one A4 page, colours kept ---------- */
+/* A4 with a half-inch margin all round — the sheet is then stretched or
+   squeezed by exactly the amount that makes it fill that page.          */
+var PG_MM=3.779527559;                        /* px in a mm at 96 dpi */
+var PG_MARGIN_MM=6.35;                        /* 0.25 inch, all four sides */
+var PG_W=Math.round((210-2*PG_MARGIN_MM)*PG_MM);   /* 746 px of paper */
+var PG_H=Math.round((297-2*PG_MARGIN_MM)*PG_MM);   /* 1074 px of paper */
+function ceoPrint(){
+  var d=ceoData();
+  var f=document.getElementById('ceoPrintFrame'); if(f)f.remove();
+  f=document.createElement('iframe'); f.id='ceoPrintFrame';
+  /* a real size, so the page inside is laid out exactly as it will print */
+  f.style.cssText='position:fixed;left:-10000px;top:0;width:'+(PG_W+40)+'px;height:'+(PG_H+40)+'px;border:0;opacity:0';
+  document.body.appendChild(f);
+  var doc=f.contentWindow.document;
+  doc.open();
+  doc.write('<!doctype html><html><head><meta charset="utf-8"><title>Executive Report — '+EX(d.D)+'</title><style>'+
+    '@page{size:210mm 297mm;margin:'+PG_MARGIN_MM+'mm}'+           /* A4 upright, 0.25 inch all sides */
+    '@media print{html,body{width:'+PG_W+'px;overflow:hidden}}'+
+    '*,*::before,*::after{-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;color-adjust:exact !important}'+
+    '@media print{html,body,#pgfit,.ce-sheet{-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important}}'+
+    'html,body{margin:0;padding:0}'+
+    'body{font-family:Segoe UI,Arial,sans-serif;color:#1f3247}'+
+    CEO_CSS+
+    '#pgfit{width:'+PG_W+'px;transform-origin:top left}'+
+    '.ce-sheet{max-width:none;width:100%;box-shadow:none;border:1px solid #9fb3c8;border-radius:8px}'+
+    'table.ce{font-size:8.4pt}table.ce td{padding:3.5px 9px}'+
+    'table.ce td.h{font-size:7.2pt;padding:4.6px 9px}'+
+    '.ce-ttl h1{font-size:9.5pt}.ce-ttl .ce-proj{font-size:17pt}.ce-kpi .v{font-size:11.5pt}.ce-kpi .l{font-size:6.6pt}.ce-kpi .s{font-size:6.8pt}'+
+    '.ce-ch h4{font-size:6.8pt}.ce-lg{font-size:7.4pt}.ce-sign div{padding-top:26px;font-size:7.6pt}'+
+    '</style></head><body><div id="pgfit">'+ceoSheetHTML(d)+'</div></body></html>');
+  doc.close();
+  /* stretch (or squeeze) the sheet so it lands exactly on the page */
+  var fit=function(){
+    try{
+      var dd=f.contentWindow.document, box=dd.getElementById('pgfit');
+      if(!box)return;
+      var k=1;
+      /* a narrower box re-wraps the text, so the scale is settled in two passes */
+      for(var i=0;i<3;i++){
+        box.style.transform='';
+        box.style.width=(PG_W/k).toFixed(1)+'px';
+        var h=box.getBoundingClientRect().height;
+        if(!h)return;
+        var nk=PG_H/h;
+        if(nk>1.45)nk=1.45;
+        if(nk<0.55)nk=0.55;
+        if(Math.abs(nk-k)<0.004){ k=nk; break; }
+        k=nk;
+      }
+      box.style.transform='';
+      box.style.width=(PG_W/k).toFixed(1)+'px';
+      var hh=box.getBoundingClientRect().height;
+      box.style.transform='scale('+k.toFixed(4)+')';
+      /* the body must be exactly as tall as the scaled sheet, or the page breaks early */
+      dd.body.style.height=(Math.floor(hh*k)-1)+'px';
+      dd.documentElement.style.height=(Math.floor(hh*k)-1)+'px';
+      dd.body.style.overflow='hidden';
+    }catch(e){}
+  };
+  setTimeout(function(){ fit(); },260);
+  setTimeout(function(){ fit(); try{ f.contentWindow.focus(); f.contentWindow.print(); }catch(e){} },620);
+}
+window.ceoPrintFit=function(){ return {w:PG_W,h:PG_H}; };
+
+function ceoCsv(){
+  var d=ceoData(), p=d.proc, m=d.mp, w=d.work, fi=d.fin;
+  var rows=[
+    ['EXECUTIVE REPORT',''],['Date',d.D],['Project',ceoProjName()],['',''],
+    ['PROCUREMENT',''],
+    ['PR Generated today (Nos)',p.prTodayNos],['PR Generated today (Items)',p.prTodayItems],
+    ['Total PR Generated (Nos)',p.prAllNos],['Total PR Generated (Items)',p.prAllItems],
+    ['Total Pending PR (Nos)',p.prPendNos],['Total Pending PR (Items)',p.prPendItems],
+    ['PO Generated today (Nos)',p.poTodayNos],['PO Generated today (Items)',p.poTodayItems],
+    ['Today PO Generated (Amount)',Math.round(p.poTodayAmt)],
+    ['Total Pending POs (Nos)',p.poPendNos],['Total Pending POs (Items)',p.poPendItems],
+    ['Total Pending POs Amount',Math.round(p.poPendAmt)],['',''],
+    ['SITE MAN POWER',''],
+    ['Total Vertical Man Power',m.vertical],['Total Contractors Man Power',m.contractor],['Total on site',m.total],['',''],
+    ['TOTAL WORK DONE',''],
+    ['TOTAL BOQ (Value) - Rs',Math.round(w.boqVal)],['Work Done Up to Now - Rs',Math.round(w.doneVal)],
+    ['Work done today (Value)',Math.round(w.todayVal)],['%age of Work Done (as per BOQ)',w.pct.toFixed(1)+'%'],['',''],
+    ['FINANCE (SITE PAYMENTS)',''],
+    ['Bills Received Today (Amount)',Math.round(fi.recToday)],
+    ['Total Bills Received Amount (up to now)',Math.round(fi.recAll)],
+    ['Paid Today (Amount)',Math.round(fi.paidToday)],
+    ['Total Paid (Amount) up to now',Math.round(fi.paidAll)],
+    ['Total Balance to be Paid',Math.round(fi.balance)]
+  ];
+  var q=function(v){ v=String(v==null?'':v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
+  var body=rows.map(function(r){ return r.map(q).join(','); }).join('\n');
+  try{ download('Executive-Report-'+d.D+'.csv','﻿'+body,'text/csv'); }
+  catch(e){
+    var a=document.createElement('a');
+    a.href=URL.createObjectURL(new Blob(['﻿'+body],{type:'text/csv'}));
+    a.download='Executive-Report-'+d.D+'.csv'; a.click();
+
+  }
+}
+
+window.renderCeoRep=renderCeoRep;
+})();
+
+</script>
+<script id="ptyAttMod">
+/* ==================================================================
+   PETTY CASH — a picture or a PDF against every line
+   The bill, the slip, the receipt: attached to the line it belongs to,
+   kept in the database with the rest of the book.
+   ================================================================== */
+(function(){
+'use strict';
+
+var PA_MAX=6;                                   /* files per line */
+var PA_PX=1600;                                 /* an image is brought down to this */
+var PA_BYTES=9*1024*1024;                       /* a single file at most */
+
+function EX(s){ try{ return esc(s); }catch(e){ return String(s==null?'':s)
+  .replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); } }
+function T(m){ try{ toast(m); }catch(e){} }
+function paList(r){ return (r&&Array.isArray(r.att))?r.att:[]; }
+function isPdf(a){ return /pdf/i.test(a.type||'')||/\.pdf($|\?)/i.test(a.name||a.url||''); }
+function paSrc(a){ return a.url||a.data||''; }
+function paRO(){ try{ return typeof isReadOnly==='function'&&isReadOnly(); }catch(e){ return false; } }
+
+/* ---------- the cell in the register ---------- */
+function ptyAttCell(r){
+  var n=paList(r).length, lk=!!(r&&r.lk);
+  var thumb='';
+  var first=paList(r)[0];
+  if(first&&!isPdf(first)&&paSrc(first)){
+    thumb='<img src="'+EX(paSrc(first))+'" alt="" class="pty-athumb">';
+  }else if(first){
+    thumb='<span class="pty-apdf">PDF</span>';
+  }
+  return '<button type="button" class="pty-attbtn'+(n?' has':'')+'" title="'+
+    (n?(n+' file'+(n===1?'':'s')+' attached'):(lk?'View attachments':'Attach a picture or a PDF'))+'">'+
+    (thumb||'<span class="pty-aclip">&#128206;</span>')+
+    (n>1?('<span class="pty-abadge">'+n+'</span>'):'')+
+    '</button>';
+}
+window.ptyAttCell=ptyAttCell;
+
+function paCss(){
+  if(document.getElementById('ptyAttCss'))return;
+  var el=document.createElement('style'); el.id='ptyAttCss';
+  el.textContent=[
+    '#tab-petty td.pty-att{text-align:center;padding:2px 4px}',
+    '#tab-petty .pty-attbtn{background:#f3f7fb;border:1px dashed #b9c9d8;border-radius:7px;padding:2px 7px;',
+    '  cursor:pointer;position:relative;line-height:1;min-width:42px;height:30px;display:inline-flex;',
+    '  align-items:center;justify-content:center;color:#5b7186}',
+    '#tab-petty .pty-attbtn:hover{background:#e8f1fb;border-color:#2c6fa8}',
+    '#tab-petty .pty-attbtn.has{border-style:solid;border-color:#2c6fa8;background:#fff;padding:1px}',
+    '#tab-petty .pty-athumb{height:26px;max-width:44px;object-fit:cover;border-radius:4px;display:block}',
+    '#tab-petty .pty-apdf{font-size:.6rem;font-weight:800;color:#b02a2a;letter-spacing:.04em}',
+    '#tab-petty .pty-aclip{font-size:.95rem;opacity:.75}',
+    '#tab-petty .pty-abadge{position:absolute;top:-6px;right:-6px;background:#2c6fa8;color:#fff;border-radius:9px;',
+    '  font-size:.58rem;font-weight:800;padding:1px 5px;line-height:1.4}',
+    /* the viewer */
+    '#ptyAttOv{position:fixed;inset:0;z-index:2147483300;background:rgba(10,25,45,.55);display:flex;',
+    '  align-items:center;justify-content:center;padding:20px}',
+    '#ptyAttOv .box{background:#fff;border-radius:14px;max-width:820px;width:100%;max-height:88vh;display:flex;',
+    '  flex-direction:column;overflow:hidden;box-shadow:0 24px 60px rgba(10,25,45,.35);font-family:inherit}',
+    '#ptyAttOv .hd{padding:13px 17px;border-bottom:1px solid #e3eaf2;display:flex;gap:10px;align-items:center;flex-wrap:wrap}',
+    '#ptyAttOv .hd b{color:#12283f;font-size:.95rem}',
+    '#ptyAttOv .hd span{font-size:.76rem;color:#6d8199}',
+    '#ptyAttOv .bd{padding:14px 17px;overflow:auto;display:grid;gap:11px;',
+    '  grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}',
+    '#ptyAttOv .it{border:1px solid #dbe5ef;border-radius:10px;overflow:hidden;background:#fbfdff}',
+    '#ptyAttOv .it .pv{height:104px;display:flex;align-items:center;justify-content:center;background:#eef3f8;cursor:pointer}',
+    '#ptyAttOv .it .pv img{width:100%;height:100%;object-fit:cover}',
+    '#ptyAttOv .it .pv .pdf{font-size:1.5rem;font-weight:800;color:#b02a2a;letter-spacing:.04em}',
+    '#ptyAttOv .it .nm{font-size:.68rem;color:#41586f;padding:5px 7px;word-break:break-all;line-height:1.35}',
+    '#ptyAttOv .it .ac{display:flex;gap:5px;padding:0 7px 7px}',
+    '#ptyAttOv .it .ac button{flex:1;border:1px solid #d5dfea;background:#fff;border-radius:6px;font-size:.66rem;',
+    '  font-weight:700;color:#27486a;padding:4px;cursor:pointer;font-family:inherit}',
+    '#ptyAttOv .it .ac button.rm{color:#b02a2a;border-color:#f0cfcf}',
+    '#ptyAttOv .ft{padding:12px 17px;border-top:1px solid #e3eaf2;background:#f7fafd;display:flex;gap:9px;',
+    '  align-items:center;flex-wrap:wrap}',
+    '#ptyAttOv .ft .p{background:#12283f;border:none;border-radius:9px;padding:9px 15px;font-size:.8rem;',
+    '  font-weight:700;color:#fff;cursor:pointer;font-family:inherit}',
+    '#ptyAttOv .ft .g{background:#fff;border:1px solid #d5dfea;border-radius:9px;padding:9px 14px;font-size:.8rem;',
+    '  font-weight:700;color:#27486a;cursor:pointer;font-family:inherit}',
+    '#ptyAttOv .ft .note{font-size:.72rem;color:#6d8199;margin-left:auto}',
+    '#ptyAttOv .empty{grid-column:1/-1;text-align:center;color:#8798ab;font-size:.84rem;padding:22px}',
+    '@media print{#tab-petty th.pty-atth,#tab-petty td.pty-att{display:none}}'
+  ].join('\n');
+  document.head.appendChild(el);
+}
+
+/* ---------- reading a file in, images brought down to a sane size ---------- */
+function paRead(file){
+  return new Promise(function(res,rej){
+    var fr=new FileReader();
+    fr.onerror=function(){ rej(new Error('read')); };
+    fr.onload=function(){
+      var url=String(fr.result||'');
+      if(!/^image\//i.test(file.type||'')){ res(url); return; }
+      var im=new Image();
+      im.onload=function(){
+        try{
+          var w=im.naturalWidth||im.width, h=im.naturalHeight||im.height;
+          var sc=Math.min(1,PA_PX/Math.max(w,h));
+          if(sc>=1&&url.length<900000){ res(url); return; }
+          var c=document.createElement('canvas');
+          c.width=Math.round(w*sc); c.height=Math.round(h*sc);
+          c.getContext('2d').drawImage(im,0,0,c.width,c.height);
+          res(c.toDataURL('image/jpeg',0.82));
+        }catch(e){ res(url); }
+      };
+      im.onerror=function(){ res(url); };
+      im.src=url;
+    };
+    fr.readAsDataURL(file);
+  });
+}
+
+/* ---------- the register's own store ---------- */
+function paDB(){ try{ return window.__pettyGet?window.__pettyGet():null; }catch(e){ return null; } }
+function paRow(id){
+  var db=paDB(); if(!db||!Array.isArray(db.rows))return null;
+  for(var i=0;i<db.rows.length;i++)if(db.rows[i].id===id)return db.rows[i];
+  return null;
+}
+function paSave(){
+  var db=paDB(); if(!db)return;
+  try{ window.__pettySet(db); }catch(e){}
+}
+
+/* ---------- the viewer / uploader ---------- */
+function paOpen(id){
+  paCss();
+  var r=paRow(id);
+  if(!r){ T('Write something on the line first, then attach the bill.'); return; }
+  var ov=document.getElementById('ptyAttOv'); if(ov)ov.remove();
+  ov=document.createElement('div'); ov.id='ptyAttOv';
+  document.body.appendChild(ov);
+
+  var locked=!!r.lk, ro=paRO();
+  var paint=function(){
+    var list=paList(r);
+    ov.innerHTML='<div class="box">'+
+      '<div class="hd"><b>&#128206; Attachments</b>'+
+        '<span>'+EX((r.payee||'')+(r.desc?(' · '+r.desc):'')+(r.date?(' · '+r.date):''))+'</span>'+
+        '<span style="margin-left:auto">'+list.length+' of '+PA_MAX+'</span></div>'+
+      '<div class="bd">'+
+        (list.length?list.map(function(a,i){
+          var src=paSrc(a);
+          return '<div class="it" data-i="'+i+'">'+
+            '<div class="pv" data-open="'+i+'">'+
+              (isPdf(a)?'<span class="pdf">PDF</span>':'<img src="'+EX(src)+'" alt="">')+
+            '</div>'+
+            '<div class="nm">'+EX(a.name||('file '+(i+1)))+(a.url?'':' <b style="color:#a9541a">· on this device only</b>')+'</div>'+
+            '<div class="ac"><button data-open="'+i+'">Open</button>'+
+              ((locked||ro)?'':'<button class="rm" data-rm="'+i+'">Remove</button>')+'</div>'+
+          '</div>';
+        }).join(''):'<div class="empty">Nothing attached to this line yet.</div>')+
+      '</div>'+
+      '<div class="ft">'+
+        ((locked||ro)?'<span style="font-size:.8rem;color:#8a5b12">🔒 This line is locked — files can be opened but not changed.</span>':
+          '<button class="p" id="paAdd">&#10133; Add picture / PDF</button>'+
+          '<button class="g" id="paCam">&#128247; Camera</button>')+
+        '<span class="note">JPG, PNG or PDF · up to '+PA_MAX+' files a line</span>'+
+        '<button class="g" id="paX">Close</button>'+
+      '</div></div>';
+
+    ov.querySelectorAll('[data-open]').forEach(function(el){
+      el.onclick=function(){
+        var a=paList(r)[+el.dataset.open]; if(!a)return;
+        var src=paSrc(a);
+        if(!src)return;
+        if(/^data:/.test(src)){
+          try{
+            var w=window.open(); if(!w){ T('Allow pop-ups to open the file.'); return; }
+            if(isPdf(a))w.document.write('<iframe src="'+src+'" style="position:fixed;inset:0;width:100%;height:100%;border:0"></iframe>');
+            else w.document.write('<img src="'+src+'" style="max-width:100%">');
+          }catch(e){}
+        }else window.open(src,'_blank');
+      };
+    });
+    ov.querySelectorAll('[data-rm]').forEach(function(el){
+      el.onclick=function(){
+        var i=+el.dataset.rm, a=paList(r)[i]; if(!a)return;
+        Promise.resolve((typeof uiConfirm==='function')
+          ? uiConfirm('Remove "'+(a.name||'this file')+'" from this line?','Remove')
+          : window.confirm('Remove this file?')).then(function(ok){
+            if(!ok)return;
+            r.att=paList(r).filter(function(x,k){ return k!==i; });
+            paSave(); paint(); paRepaintCell(r.id);
+            T('File removed.');
+          });
+      };
+    });
+    var x=ov.querySelector('#paX'); if(x)x.onclick=function(){ ov.remove(); };
+    var add=ov.querySelector('#paAdd'); if(add)add.onclick=function(){ paPick(r,paint,false); };
+    var cam=ov.querySelector('#paCam'); if(cam)cam.onclick=function(){ paPick(r,paint,true); };
+  };
+  ov.addEventListener('mousedown',function(e){ if(e.target===ov)ov.remove(); });
+  paint();
+}
+
+function paPick(r,paint,camera){
+  var inp=document.createElement('input');
+  inp.type='file';
+  inp.accept=camera?'image/*':'image/*,application/pdf,.pdf';
+  if(camera)inp.setAttribute('capture','environment');
+  else inp.multiple=true;
+  inp.style.display='none';
+  document.body.appendChild(inp);
+  inp.onchange=async function(){
+    var files=Array.prototype.slice.call(inp.files||[]);
+    inp.remove();
+    if(!files.length)return;
+    var room=PA_MAX-paList(r).length;
+    if(room<=0){ T('This line already has '+PA_MAX+' files.'); return; }
+    if(files.length>room){ files=files.slice(0,room); T('Only '+room+' more file'+(room===1?'':'s')+' can go on this line.'); }
+    T('Reading '+files.length+' file'+(files.length===1?'':'s')+'…');
+    for(var i=0;i<files.length;i++){
+      var f=files[i];
+      if(f.size>PA_BYTES&&!/^image\//i.test(f.type||'')){ T('"'+f.name+'" is too big — keep a PDF under 9 MB.'); continue; }
+      var data='';
+      try{ data=await paRead(f); }catch(e){ T('"'+f.name+'" could not be read.'); continue; }
+      var rec={id:'a'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),
+               name:f.name||('file-'+(i+1)), type:f.type||'', at:Date.now(),
+               by:(function(){ try{ return (currentUser&&currentUser.name)||''; }catch(e){ return ''; } })()};
+      /* into the database if we can reach it, otherwise it waits on this device */
+      var url=null;
+      try{ if(window.cloudUploadAttachment)url=await window.cloudUploadAttachment(data,'petty',rec.id,rec.name); }catch(e){ url=null; }
+      if(url)rec.url=url; else rec.data=data;
+      if(!Array.isArray(r.att))r.att=[];
+      r.att.push(rec);
+      paSave();
+      if(paint)paint();
+      paRepaintCell(r.id);
+    }
+    T(url_ok(r)?'✅ Attached and sent to the database.':'✅ Attached — kept on this device until the database is reachable.');
+  };
+  inp.click();
+}
+function url_ok(r){ return paList(r).every(function(a){ return !!a.url; }); }
+
+/* just the one cell, so nothing else on the sheet moves */
+function paRepaintCell(id){
+  var tr=document.querySelector('#ptyTable tr[data-id="'+id+'"]');
+  if(!tr)return;
+  var td=tr.querySelector('td.pty-att');
+  if(td)td.innerHTML=ptyAttCell(paRow(id)||{});
+}
+
+/* one listener on the table covers every row, now and after any redraw */
+function paBoot(){
+  var tb=document.getElementById('ptyTable');
+  if(!tb||tb._paWired)return;
+  tb._paWired=1;
+  paCss();
+  tb.addEventListener('click',function(e){
+    var b=e.target.closest?e.target.closest('.pty-attbtn'):null;
+    if(!b)return;
+    e.preventDefault();
+    var tr=b.closest('tr'); if(!tr)return;
+    var id=tr.getAttribute('data-id');
+    if(!id){ T('Write the date or the detail first — then the bill can be attached.'); return; }
+    paOpen(id);
+  });
+}
+document.addEventListener('DOMContentLoaded',paBoot);
+setTimeout(paBoot,1200);
+setInterval(paBoot,2500);
 })();
 
 </script>
