@@ -50391,7 +50391,7 @@ function cosBlank(){
   return {
     v:1,
     users:[{id:'cu_admin',name:'Administrator',user:'admin',pass:hp('admin123'),role:'admin',active:1,_u:nowMs()}],
-    mom:[], tasks:[], pay:[], dwt:[], dwtInit:{},
+    mom:[], tasks:[], pay:[], dwt:[], dwtInit:{}, dwtLock:{},
     lists:{ locations:['Main Lobby'], poc:['S2','Umer','Ijaz'], party:[], projects:[], people:[] },
     seq:{ mom:0, task:0, pay:0 },
     _u:nowMs()
@@ -50406,6 +50406,7 @@ function cosNorm(o){
   o.pay   = Array.isArray(o.pay)?o.pay:[];
   o.dwt   = Array.isArray(o.dwt)?o.dwt:[];
   o.dwtInit = (o.dwtInit&&typeof o.dwtInit==='object'&&!Array.isArray(o.dwtInit))?o.dwtInit:{};
+  o.dwtLock = (o.dwtLock&&typeof o.dwtLock==='object'&&!Array.isArray(o.dwtLock))?o.dwtLock:{};
   o.lists = Object.assign({locations:[],poc:[],party:[],projects:[],people:[]}, o.lists||{});
   ['locations','poc','party','projects','people'].forEach(function(k){
     if(!Array.isArray(o.lists[k]))o.lists[k]=[];
@@ -50455,7 +50456,7 @@ function cosRows(){
   (COS.tasks||[]).forEach(function(r){ out.push({item_id:'task:'+r.id,data:r}); });
   (COS.pay||[]).forEach(function(r){ out.push({item_id:'pay:'+r.id,data:r}); });
   (COS.dwt||[]).forEach(function(r){ out.push({item_id:'dwt:'+r.id,data:r}); });
-  out.push({item_id:'lists',data:{lists:COS.lists,seq:COS.seq,dwtInit:COS.dwtInit,_u:COS._u}});
+  out.push({item_id:'lists',data:{lists:COS.lists,seq:COS.seq,dwtInit:COS.dwtInit,dwtLock:COS.dwtLock,_u:COS._u}});
   return out;
 }
 async function cosPush(only){
@@ -50490,6 +50491,7 @@ async function cosPull(){
       if(id==='lists'){
         if(d.lists&&(!COS._u||num(d._u)>num(COS._u))){ COS.lists=Object.assign(COS.lists,d.lists); COS.seq=Object.assign(COS.seq,d.seq||{}); }
         if(d.dwtInit)COS.dwtInit=Object.assign(COS.dwtInit||{},d.dwtInit);
+        if(d.dwtLock)COS.dwtLock=Object.assign(COS.dwtLock||{},d.dwtLock);
         return;
       }
       var p=id.split(':'), kind=p[0], key=p.slice(1).join(':');
@@ -51315,7 +51317,8 @@ function cdDailyRow(r){
     '<td>'+pill(r.status||'Open')+'</td>'+
     '<td style="white-space:nowrap;text-align:right">'+
       (cosCanEdit()?('<button class="g" data-cddg="'+E(r.id)+'" title="Open the daily sheet">\uD83D\uDCD6</button> '+
-        (done?'':'<button class="g" data-cddd="'+E(r.id)+'" title="Mark done" style="background:#e8f7ed;border-color:#c6e8d3;color:#1c7a42">\u2714</button>')):'')+
+        ((done||dwtLocked(r.d))?(dwtLocked(r.d)?'<span style="font-size:.68rem;color:#8a5b12">\uD83D\uDD12</span>':'')
+          :'<button class="g" data-cddd="'+E(r.id)+'" title="Mark done" style="background:#e8f7ed;border-color:#c6e8d3;color:#1c7a42">\u2714</button>')):'')+
     '</td></tr>';
 }
 /* one row of the day's table — a MOM action point */
@@ -51543,6 +51546,7 @@ function cosTodayTab(body){
   body.querySelectorAll('[data-cddd]').forEach(function(b2){ b2.onclick=function(){
     if(!cosNeedEdit())return;
     var r=(COS.dwt||[]).find(function(x){ return x.id===b2.dataset.cddd; }); if(!r)return;
+    if(dwtLocked(r.d)){ T('\uD83D\uDD12 That day is locked \u2014 unlock it on the Daily Work To Do sheet.'); return; }
     r.status='Done'; r._u=nowMs(); cosSave(); cosPaint();
     T('\u2714 Marked done on the daily list.');
   }; });
@@ -52895,7 +52899,11 @@ function dwtCss(){
     '#cosOv tr.dw-carry td{background:#fffaf0}',
     '#cosOv tr.dw-done td{background:#f4fbf6}',
     '#cosOv .dw-since{font-size:.7rem;color:#8a5b12;font-weight:700;white-space:nowrap}',
-    '#cosOv .dw-none{padding:22px;text-align:center;color:#8798ab}'
+    '#cosOv .dw-none{padding:22px;text-align:center;color:#8798ab}',
+    '#cosOv .cos-cb>.lockbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:9px 12px;',
+    '  border-radius:10px;margin-bottom:11px;font-size:.8rem;background:#fff6e5;border:1px solid #f0d9ad;color:#8a5b12}',
+    '#cosOv .cos-cb>.lockbar>span:first-child{font-weight:800}',
+    '#cosOv .cos-cb>.lockbar.lk{background:#eef3f8;border-color:#cbd7e4;color:#41586f}'
   ].join('\n');
   document.head.appendChild(st);
 }
@@ -52947,6 +52955,31 @@ function dwtInitDay(d){
   cosSave(true);
   return n;
 }
+/* ---------- a day can be saved and locked, like a MOM sheet ---------- */
+function dwtLocks(){ if(!COS.dwtLock||typeof COS.dwtLock!=='object')COS.dwtLock={}; return COS.dwtLock; }
+function dwtLocked(d){ var L=dwtLocks()[d]; return !!(L&&L.at); }
+function dwtLockInfo(d){ return dwtLocks()[d]||null; }
+function dwtLockDay(d){
+  var rows=dwtFor(d).filter(function(r){ return String(r.work||'').trim(); });
+  if(!rows.length){ T('Write at least one line before locking the day.'); return; }
+  uiConfirm('Lock '+dShort(d)+'?\n\nThe day becomes read-only. Editing it afterwards needs an admin password.\n\n'+
+    rows.length+' line'+(rows.length===1?'':'s')+' \u00b7 anything still pending will keep moving to the next day.','\uD83D\uDD12 Save & Lock')
+    .then(function(ok){
+      if(!ok)return;
+      dwtLocks()[d]={by:(COSU&&COSU.name)||'',at:nowMs(),on:today()};
+      COS._u=nowMs(); cosSave(); cosPaint();
+      T('\uD83D\uDD12 '+dShort(d)+' saved and locked.');
+    });
+}
+function dwtUnlockDay(d){
+  cosPass('\uD83D\uDD13 Unlock '+dShort(d),'Enter an admin password \u2014 a Master Settings admin\u2019s own password, or the Master password.')
+    .then(function(v){
+      if(v==null)return;
+      delete dwtLocks()[d];
+      COS._u=nowMs(); cosSave(); cosPaint();
+      T('\uD83D\uDD13 '+dShort(d)+' is open for entry again.');
+    });
+}
 function dwtAdd(d){
   var ord=dwtFor(d).length;
   var r={id:uid('w_'),d:d,work:'',proj:'',by:'',note:'',tgt:'',status:'Open',raised:d,carried:0,ord:ord,_u:nowMs()};
@@ -52955,8 +52988,8 @@ function dwtAdd(d){
 
 function cosDwtTab(body){
   dwtCss();
-  var d=dwtDay(), ed=cosCanEdit();
-  var carried=ed?dwtInitDay(d):0;
+  var d=dwtDay(), may=cosCanEdit(), lk=dwtLocked(d), ed=may&&!lk, LI=dwtLockInfo(d);
+  var carried=may?dwtInitDay(d):0;
   var rows=dwtFor(d), dates=dwtDates(), prev=dwtPrevDay(d);
   var done=rows.filter(function(r){ return r.status==='Done'; }).length;
   var cancelled=rows.filter(function(r){ return r.status==='Cancelled'; }).length;
@@ -52969,6 +53002,20 @@ function cosDwtTab(body){
     '<div class="b" style="border-left-color:#d99a2b"><div class="n">'+pend+'</div><div class="l">Still pending</div></div>'+
     '<div class="b" style="border-left-color:#a9541a"><div class="n">'+carryN+'</div><div class="l">Carried over</div></div>'+
     '</div>';
+
+  var lockbar = lk
+    ? ('<div class="lockbar lk"><span>\uD83D\uDD12 Saved &amp; locked</span>'+
+        '<span style="font-weight:600">'+E(dShort(d))+
+          ((LI&&LI.by)?(' \u00b7 by '+E(LI.by)):'')+
+          ((LI&&LI.on)?(' \u00b7 on '+E(dShort(LI.on))):'')+
+          ' \u2014 nothing on this day can be changed until it is unlocked.</span>'+
+        '<span style="margin-left:auto"></span>'+
+        (may?'<button class="g" id="dwUnlock">\uD83D\uDD13 Unlock to edit (admin password)</button>':'')+
+      '</div>')
+    : (may?('<div class="lockbar"><span>\u270E Open for entry</span>'+
+        '<span style="font-weight:600">every keystroke is saved. When the day is finished, lock it.</span>'+
+        '<span style="margin-left:auto"></span>'+
+        '<button class="p" id="dwLock">\uD83D\uDD12 Save &amp; Lock</button></div>'):'');
 
   var bar='<div class="dw-bar">'+
     '<span class="day">\u{1F5D3} '+E(dLong(d))+'</span>'+
@@ -53033,7 +53080,7 @@ function cosDwtTab(body){
     '<div class="cos-card"><div class="cos-ch">'+
       '<h3>\u{1F5D3} Daily Work To Do</h3>'+
       '<span class="hint">one sheet a day · anything not finished moves to the next day by itself</span>'+
-    '</div><div class="cos-cb">'+bar+
+    '</div><div class="cos-cb">'+lockbar+bar+
       (carried?('<div style="font-size:.79rem;color:#8a5b12;background:#fff6e5;border:1px solid #f0d9ad;border-radius:8px;padding:7px 11px;margin-bottom:10px">'+
         '↻ <b>'+carried+'</b> pending item'+(carried===1?'':'s')+' carried into this day from '+E(dShort(prev))+'.</div>'):'')+
       tbl+
@@ -53058,6 +53105,8 @@ function cosDwtTab(body){
     if(!n)T('Nothing pending on '+dShort(prev)+'.');
     cosPaint();
   };
+  if(g('dwLock'))g('dwLock').onclick=function(){ dwtLockDay(d); };
+  if(g('dwUnlock'))g('dwUnlock').onclick=function(){ dwtUnlockDay(d); };
   g('dwPrint').onclick=function(){ dwtPrint(d,rows); };
   g('dwCsv').onclick=function(){
     cosCsv('daily-work-'+d+'.csv',['S.#','Date','Work / To Do','Project','Responsible','Target Date','Status','Remarks','First raised'],
