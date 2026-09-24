@@ -50392,7 +50392,7 @@ function cosBlank(){
     v:1,
     users:[{id:'cu_admin',name:'Administrator',user:'admin',pass:hp('admin123'),role:'admin',active:1,_u:nowMs()}],
     mom:[], tasks:[], pay:[], dwt:[], dwtInit:{},
-    lists:{ locations:['Main Lobby'], poc:['S2','Umer','Ijaz'], party:[] },
+    lists:{ locations:['Main Lobby'], poc:['S2','Umer','Ijaz'], party:[], projects:[], people:[] },
     seq:{ mom:0, task:0, pay:0 },
     _u:nowMs()
   };
@@ -50406,7 +50406,11 @@ function cosNorm(o){
   o.pay   = Array.isArray(o.pay)?o.pay:[];
   o.dwt   = Array.isArray(o.dwt)?o.dwt:[];
   o.dwtInit = (o.dwtInit&&typeof o.dwtInit==='object'&&!Array.isArray(o.dwtInit))?o.dwtInit:{};
-  o.lists = Object.assign({locations:[],poc:[],party:[]}, o.lists||{});
+  o.lists = Object.assign({locations:[],poc:[],party:[],projects:[],people:[]}, o.lists||{});
+  ['locations','poc','party','projects','people'].forEach(function(k){
+    if(!Array.isArray(o.lists[k]))o.lists[k]=[];
+    o.lists[k]=o.lists[k].filter(function(v){ return typeof v==='string'&&v.trim(); });
+  });
   o.seq   = Object.assign({mom:0,task:0,pay:0}, o.seq||{});
   if(!o.users.some(function(u){ return String(u.user||'').toLowerCase()==='admin'; }))
     o.users.unshift(b.users[0]);
@@ -50667,10 +50671,13 @@ function cosCsv(name,head,rows){
 /* ---------- the project list, shared by every tab ---------- */
 function cosProjects(){
   var out=[];
-  try{ (typeof allProjects==='function'?allProjects():[]).forEach(function(p){ out.push(p.name); }); }catch(e){}
+  var add=function(v){ v=String(v==null?'':v).trim(); if(v&&out.indexOf(v)<0)out.push(v); };
+  try{ (typeof allProjects==='function'?allProjects():[]).forEach(function(p){ add(p.name); }); }catch(e){}
+  try{ (COS.lists&&COS.lists.projects||[]).forEach(add); }catch(e){}     /* the ones written in Settings */
   ['mom','tasks','pay'].forEach(function(k){
-    (COS[k==='tasks'?'tasks':k]||[]).forEach(function(r){ if(r.project&&out.indexOf(r.project)<0)out.push(r.project); });
+    (COS[k==='tasks'?'tasks':k]||[]).forEach(function(r){ add(r.project); });
   });
+  try{ (COS.dwt||[]).forEach(function(r){ add(r.proj); }); }catch(e){}
   return out;
 }
 function selOpts(list,cur,blank){
@@ -50739,7 +50746,8 @@ var COS_TABS=[
   ['today', '📅 CURRENT DAY TASK'],
   ['dwt',   '🗓 DAILY WORK TO DO'],
   ['rep',   '📊 REPORTS'],
-  ['pay',   '💰 PAYMENTS ISSUES']
+  ['pay',   '💰 PAYMENTS ISSUES'],
+  ['set',   '⚙️ SETTINGS']
 ];
 
 function cosPaint(){
@@ -50769,6 +50777,7 @@ function cosPaint(){
   else if(COS_TAB==='tasks') cosTaskTab(body);
   else if(COS_TAB==='today') cosTodayTab(body);
   else if(COS_TAB==='dwt')   cosDwtTab(body);
+  else if(COS_TAB==='set')   cosSetTab(body);
   else if(COS_TAB==='rep')   cosRepTab(body);
   else                       cosPayTab(body);
 }
@@ -50951,8 +50960,8 @@ function taskAll(){
     var st=(r.status==='Done')?'Completed':(r.status==='Cancelled'?'Cancelled':(r.status||'Open'));
     out.push({src:'daily',kind:'Daily',id:r.id,sno:'',date:r.d||'',project:r.proj||'',
       detail:r.work||'',sub:r.note||'',location:'',poc:r.by||'',
-      target:r.d||'',targetTxt:'',priority:'Normal',status:st,
-      flag:dueFlag(r.d,st),lu:null,nUpd:0,
+      target:r.tgt||r.d||'',targetTxt:'',priority:'Normal',status:st,
+      flag:dueFlag(r.tgt||r.d,st),lu:null,nUpd:0,
       ref:(r.raised&&r.raised!==r.d)?('raised '+dShort(r.raised)):'',raw:r});
   });
   return out;
@@ -51301,7 +51310,8 @@ function cdDailyRow(r){
       (r.note?('<div style="font-size:.71rem;color:#6d8199;margin-top:2px;white-space:pre-wrap">'+E(r.note)+'</div>'):'')+'</td>'+
     '<td>\u2014</td>'+
     '<td>'+E(r.by||'\u2014')+'</td>'+
-    '<td style="white-space:nowrap">'+E(dShort(r.d))+'</td>'+
+    '<td style="white-space:nowrap">'+E(r.tgt?dShort(r.tgt):dShort(r.d))+
+      ((r.tgt&&r.tgt<cdDay()&&r.status!=='Done'&&r.status!=='Cancelled')?'<div style="font-size:.68rem;color:#b02a2a;font-weight:700">overdue</div>':'')+'</td>'+
     '<td>'+pill(r.status||'Open')+'</td>'+
     '<td style="white-space:nowrap;text-align:right">'+
       (cosCanEdit()?('<button class="g" data-cddg="'+E(r.id)+'" title="Open the daily sheet">\uD83D\uDCD6</button> '+
@@ -52918,7 +52928,7 @@ function dwtCarry(d,quiet){
     if(!String(r.work||'').trim())return;
     if(have[k])return;
     have[k]=1;
-    dwtAll().push({id:uid('w_'),d:d,work:r.work,proj:r.proj||'',by:r.by||'',note:r.note||'',
+    dwtAll().push({id:uid('w_'),d:d,work:r.work,proj:r.proj||'',by:r.by||'',note:r.note||'',tgt:r.tgt||'',
       status:(r.status==='Done'?'Open':(r.status||'Open')),raised:r.raised||prev,
       carried:1,ord:ord++,by2:(COSU&&COSU.name)||'',_u:nowMs()});
     n++;
@@ -52939,7 +52949,7 @@ function dwtInitDay(d){
 }
 function dwtAdd(d){
   var ord=dwtFor(d).length;
-  var r={id:uid('w_'),d:d,work:'',proj:'',by:'',note:'',status:'Open',raised:d,carried:0,ord:ord,_u:nowMs()};
+  var r={id:uid('w_'),d:d,work:'',proj:'',by:'',note:'',tgt:'',status:'Open',raised:d,carried:0,ord:ord,_u:nowMs()};
   dwtAll().push(r); cosSave(); return r;
 }
 
@@ -52987,7 +52997,7 @@ function cosDwtTab(body){
       '<th style="width:44px">S.#</th>'+
       '<th style="min-width:240px">Work / To Do</th>'+
       '<th style="width:150px">Project</th>'+
-      '<th style="width:130px">Responsible</th>'+
+      '<th style="width:130px">Responsible</th>'+      '<th style="width:130px">Target Date</th>'+
       '<th style="width:140px">Status</th>'+
       '<th style="min-width:170px">Remarks</th>'+
       '<th style="width:110px">Since</th>'+
@@ -53004,6 +53014,9 @@ function cosDwtTab(body){
                    :E(r.proj||''))+'</td>'+
           '<td>'+(ed?('<input data-w="by" list="cosPocL" value="'+E(r.by||'')+'" placeholder="who">')
                    :E(r.by||''))+'</td>'+
+          '<td>'+(ed?('<input type="date" data-w="tgt" value="'+E(r.tgt||'')+'" style="width:100%">')
+                   :(r.tgt?E(dShort(r.tgt)):'\u2014'))+
+            (r.tgt&&!DWT_DONE[r.status]&&r.tgt<d?('<div style="font-size:.66rem;color:#b02a2a;font-weight:700">overdue</div>'):'')+'</td>'+
           '<td>'+(ed?('<select data-w="status">'+selOpts(DWT_STATUS,r.status||'Open','')+'</select>')
                    :pill(r.status||'Open'))+'</td>'+
           '<td>'+(ed?('<textarea data-w="note" placeholder="remarks">'+E(r.note||'')+'</textarea>')
@@ -53047,8 +53060,8 @@ function cosDwtTab(body){
   };
   g('dwPrint').onclick=function(){ dwtPrint(d,rows); };
   g('dwCsv').onclick=function(){
-    cosCsv('daily-work-'+d+'.csv',['S.#','Date','Work / To Do','Project','Responsible','Status','Remarks','First raised'],
-      rows.map(function(r,i){ return [i+1,d,r.work||'',r.proj||'',r.by||'',r.status||'Open',r.note||'',r.raised||d]; }));
+    cosCsv('daily-work-'+d+'.csv',['S.#','Date','Work / To Do','Project','Responsible','Target Date','Status','Remarks','First raised'],
+      rows.map(function(r,i){ return [i+1,d,r.work||'',r.proj||'',r.by||'',r.tgt||'',r.status||'Open',r.note||'',r.raised||d]; }));
   };
   if(!ed)return;
   body.querySelectorAll('tr[data-wid]').forEach(function(tr){
@@ -53078,15 +53091,186 @@ function dwtPrint(d,rows){
   var head='<h2 style="margin:0 0 3px">Daily Work To Do</h2>'+
     '<div style="font-size:.85rem;color:#4a5f75;margin-bottom:10px">'+E(dLong(d))+'</div>';
   var t='<table><thead><tr>'+
-    ['S.#','Work / To Do','Project','Responsible','Status','Remarks','First raised']
+    ['S.#','Work / To Do','Project','Responsible','Target Date','Status','Remarks','First raised']
       .map(function(h){ return '<th>'+h+'</th>'; }).join('')+'</tr></thead><tbody>'+
     (rows.length?rows.map(function(r,i){
       return '<tr><td>'+(i+1)+'</td><td>'+E(r.work||'')+'</td><td>'+E(r.proj||'')+'</td>'+
-        '<td>'+E(r.by||'')+'</td><td>'+E(r.status||'Open')+'</td><td>'+E(r.note||'')+'</td>'+
+        '<td>'+E(r.by||'')+'</td><td>'+E(r.tgt?dShort(r.tgt):'')+'</td><td>'+E(r.status||'Open')+'</td><td>'+E(r.note||'')+'</td>'+
         '<td>'+E(r.raised&&r.raised!==d?dShort(r.raised):'today')+'</td></tr>';
-    }).join(''):'<tr><td colspan="7" style="text-align:center;color:#8798ab">Nothing on this day</td></tr>')+
+    }).join(''):'<tr><td colspan="8" style="text-align:center;color:#8798ab">Nothing on this day</td></tr>')+
     '</tbody></table>';
   cosPrint('Daily Work To Do — '+dShort(d),head+t,true);
+}
+
+
+/* ================= SETTINGS =================
+   The lists the whole register picks from: Projects, POC / Responsible,
+   Participants, Locations and Parties. Written here once, used everywhere.  */
+var CS_LISTS=[
+  {k:'projects',  t:'Projects',              i:'\u{1F3D7}', n:'the Project dropdown on Tasks, MOM, Daily Work and Payments'},
+  {k:'poc',       t:'POC / Responsible',     i:'\u{1F464}', n:'who a task or a line is against'},
+  {k:'people',    t:'Participants (MOM)',    i:'\u{1F465}', n:'the names offered on a MOM sheet'},
+  {k:'locations', t:'Locations',             i:'\u{1F4CD}', n:'where the work is · also the MOM venue'},
+  {k:'party',     t:'Parties / Vendors',     i:'\u{1F3E2}', n:'who a payment issue is with'}
+];
+
+function csList(k){
+  if(!COS.lists)COS.lists={};
+  if(!Array.isArray(COS.lists[k]))COS.lists[k]=[];
+  return COS.lists[k];
+}
+/* the project list the app itself brings — those cannot be removed here */
+function csAppProjects(){
+  var out=[];
+  try{ (typeof allProjects==='function'?allProjects():[]).forEach(function(p){
+    var v=String(p.name||'').trim(); if(v)out.push(v); }); }catch(e){}
+  return out;
+}
+/* where a name is in use, so nothing is removed by mistake */
+function csUsed(k,v){
+  v=String(v||'').trim(); if(!v)return 0;
+  var n=0;
+  var eq=function(x){ return String(x||'').trim()===v; };
+  if(k==='projects'){
+    (COS.tasks||[]).forEach(function(r){ if(eq(r.project))n++; });
+    (COS.pay||[]).forEach(function(r){ if(eq(r.project))n++; });
+    (COS.dwt||[]).forEach(function(r){ if(eq(r.proj))n++; });
+    (COS.mom||[]).forEach(function(m){ ((typeof momProjs==='function')?momProjs(m):[]).forEach(function(x){ if(eq(x))n++; }); });
+  }else if(k==='poc'||k==='people'){
+    (COS.tasks||[]).forEach(function(r){ if(eq(r.poc))n++; });
+    (COS.dwt||[]).forEach(function(r){ if(eq(r.by))n++; });
+    (COS.mom||[]).forEach(function(m){
+      if(eq(m.chair))n++;
+      ((m.people||[])).forEach(function(x){ if(eq(x))n++; });
+      (m.points||[]).forEach(function(p){ if(eq(p.by))n++; });
+    });
+  }else if(k==='locations'){
+    (COS.tasks||[]).forEach(function(r){ if(eq(r.location))n++; });
+    (COS.mom||[]).forEach(function(m){ if(eq(m.venue))n++; });
+  }else if(k==='party'){
+    (COS.pay||[]).forEach(function(r){ if(eq(r.party))n++; });
+  }
+  return n;
+}
+/* renaming a name carries every record with it */
+function csRename(k,from,to){
+  from=String(from||'').trim(); to=String(to||'').trim();
+  if(!from||!to||from===to)return 0;
+  var n=0, sw=function(o,f){ if(String(o[f]||'').trim()===from){ o[f]=to; o._u=nowMs(); n++; } };
+  if(k==='projects'){
+    (COS.tasks||[]).forEach(function(r){ sw(r,'project'); });
+    (COS.pay||[]).forEach(function(r){ sw(r,'project'); });
+    (COS.dwt||[]).forEach(function(r){ sw(r,'proj'); });
+    (COS.mom||[]).forEach(function(m){
+      var l=(typeof momProjs==='function')?momProjs(m):[];
+      if(l.indexOf(from)>=0){
+        momSetProjs(m,l.map(function(x){ return x===from?to:x; }));
+        m._u=nowMs(); n++;
+      }
+    });
+  }else if(k==='poc'||k==='people'){
+    (COS.tasks||[]).forEach(function(r){ sw(r,'poc'); });
+    (COS.dwt||[]).forEach(function(r){ sw(r,'by'); });
+    (COS.mom||[]).forEach(function(m){
+      sw(m,'chair');
+      if(Array.isArray(m.people)&&m.people.indexOf(from)>=0){
+        m.people=m.people.map(function(x){ return x===from?to:x; });
+        if(typeof momSetPeople==='function')momSetPeople(m,m.people);
+        m._u=nowMs(); n++;
+      }
+      (m.points||[]).forEach(function(p){ if(String(p.by||'').trim()===from){ p.by=to; m._u=nowMs(); n++; } });
+    });
+  }else if(k==='locations'){
+    (COS.tasks||[]).forEach(function(r){ sw(r,'location'); });
+    (COS.mom||[]).forEach(function(m){ sw(m,'venue'); });
+  }else if(k==='party'){
+    (COS.pay||[]).forEach(function(r){ sw(r,'party'); });
+  }
+  return n;
+}
+
+function cosSetTab(body){
+  var ed=cosCanEdit();
+  var cards=CS_LISTS.map(function(L){
+    var own=csList(L.k).slice().sort(function(a,b){ return String(a).localeCompare(String(b)); });
+    var app=(L.k==='projects')?csAppProjects():[];
+    var rows='';
+    app.forEach(function(v){
+      rows+='<tr><td>'+E(v)+'</td>'+
+        '<td><span style="background:#eef3f8;color:#41586f;border-radius:7px;padding:2px 7px;font-size:.66rem;font-weight:800">from the app</span></td>'+
+        '<td style="text-align:right;color:#8798ab;font-size:.72rem">'+csUsed(L.k,v)+' in use</td>'+
+        '<td></td></tr>';
+    });
+    own.forEach(function(v){
+      if(app.indexOf(v)>=0)return;
+      var n=csUsed(L.k,v);
+      rows+='<tr><td>'+E(v)+'</td>'+
+        '<td><span style="background:#e8f1fb;color:#1d5a8f;border-radius:7px;padding:2px 7px;font-size:.66rem;font-weight:800">added here</span></td>'+
+        '<td style="text-align:right;color:#8798ab;font-size:.72rem">'+n+' in use</td>'+
+        '<td style="text-align:right;white-space:nowrap">'+
+          (ed?('<button class="g" data-csr="'+E(L.k)+'|'+E(v)+'" title="Rename everywhere">✎</button> '+
+               '<button class="d" data-csx="'+E(L.k)+'|'+E(v)+'" title="Remove from the list">✕</button>'):'')+
+        '</td></tr>';
+    });
+    var total=app.length+own.filter(function(v){ return app.indexOf(v)<0; }).length;
+    return '<div class="cos-card"><div class="cos-ch">'+
+      '<h3>'+L.i+' '+E(L.t)+'</h3><span class="hint">'+E(L.n)+'</span>'+
+      '<span class="sp"></span><span class="hint">'+total+' name'+(total===1?'':'s')+'</span>'+
+      (ed?('<button class="p" data-csa="'+E(L.k)+'">➕ Add</button>'):'')+
+    '</div><div class="cos-cb">'+
+      (total?('<div class="cos-tw"><table class="cos-t"><tbody>'+rows+'</tbody></table></div>')
+            :'<div class="empty">Nothing on this list yet.</div>')+
+    '</div></div>';
+  }).join('');
+
+  body.innerHTML=
+    '<div class="cos-card"><div class="cos-ch"><h3>⚙️ Settings</h3>'+
+      '<span class="hint">the lists every sheet picks from — written once, used by MOM, Tasks, Daily Work To Do and Payments</span>'+
+    '</div><div class="cos-cb">'+
+      '<div style="font-size:.78rem;color:#41586f;line-height:1.6">'+
+        'A name added here shows up in the dropdowns at once, on every device. '+
+        'Renaming one carries every record that already uses it. '+
+        'The projects the application itself carries are always on the list and cannot be removed from here.'+
+      '</div>'+
+    '</div></div>'+cards;
+
+  if(!ed)return;
+  body.querySelectorAll('[data-csa]').forEach(function(b){ b.onclick=function(){
+    var k=b.dataset.csa, L=CS_LISTS.filter(function(x){ return x.k===k; })[0]||{t:'name'};
+    uiPrompt('New '+L.t.replace(/\s*\(.*\)/,'')+' name:','').then(function(v){
+      v=String(v==null?'':v).trim(); if(!v)return;
+      var l=csList(k);
+      var dup=l.some(function(x){ return String(x).toLowerCase()===v.toLowerCase(); })||
+              (k==='projects'&&csAppProjects().some(function(x){ return x.toLowerCase()===v.toLowerCase(); }));
+      if(dup){ T('“'+v+'” is already on the list.'); return; }
+      l.push(v); COS._u=nowMs(); cosSave(); cosPaint();
+      T('✅ “'+v+'” added.');
+    });
+  }; });
+  body.querySelectorAll('[data-csr]').forEach(function(b){ b.onclick=function(){
+    var pr=String(b.dataset.csr).split('|'), k=pr[0], from=pr.slice(1).join('|');
+    uiPrompt('Rename “'+from+'” to:',from).then(function(v){
+      v=String(v==null?'':v).trim(); if(!v||v===from)return;
+      var l=csList(k), i=l.indexOf(from);
+      if(i<0)return;
+      l[i]=v;
+      var n=csRename(k,from,v);
+      COS._u=nowMs(); cosSave(); cosPaint();
+      T('✎ Renamed'+(n?(' · '+n+' record'+(n===1?'':'s')+' updated'):'')+'.');
+    });
+  }; });
+  body.querySelectorAll('[data-csx]').forEach(function(b){ b.onclick=function(){
+    var pr=String(b.dataset.csx).split('|'), k=pr[0], v=pr.slice(1).join('|');
+    var n=csUsed(k,v);
+    uiConfirm('Remove “'+v+'” from the list?'+
+      (n?('\n\nIt is on '+n+' record'+(n===1?'':'s')+' — those keep the name, it simply stops being offered in the dropdown.'):''),
+      'Remove').then(function(ok){
+        if(!ok)return;
+        COS.lists[k]=csList(k).filter(function(x){ return x!==v; });
+        COS._u=nowMs(); cosSave(); cosPaint();
+        T('Removed from the list.');
+      });
+  }; });
 }
 
 })();
