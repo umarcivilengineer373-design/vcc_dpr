@@ -50615,7 +50615,7 @@ var COS_CSS = [
 '#cosOv .cos-tab{background:#eef3f8;border:1px solid #dde5ee;border-radius:9px;padding:8px 15px;font-size:.8rem;font-weight:700;color:#41586f;cursor:pointer;white-space:nowrap}',
 '#cosOv .cos-tab:hover{background:#e3ecf5}',
 '#cosOv .cos-tab.on{background:#12283f;border-color:#12283f;color:#fff}',
-'#cosOv .cos-body{padding:16px 18px 40px;max-width:1500px;margin:0 auto}',
+'#cosOv .cos-body{padding:12px 14px 40px;max-width:none;margin:0}',
 '#cosOv .cos-card{background:#fff;border:1px solid #dbe3ec;border-radius:14px;box-shadow:0 2px 10px rgba(16,36,60,.05);margin-bottom:14px;overflow:hidden}',
 '#cosOv .cos-ch{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:11px 15px;border-bottom:1px solid #e7edf4;background:#f7fafd}',
 '#cosOv .cos-ch h3{margin:0;font-size:.95rem;font-weight:800;color:#12283f;letter-spacing:.01em}',
@@ -50803,8 +50803,8 @@ var COS_TABS=[
   ['mom',   '📝 MOM'],
   ['tasks', '✅ TASKS'],
   ['today', '📅 CURRENT DAY TASK'],
+  ['drep',  '🖨 DAILY REPORT'],
   ['dwt',   '🗓 DAILY WORK TO DO'],
-  ['rep',   '📊 REPORTS'],
   ['pay',   '💰 PAYMENTS ISSUES'],
   ['set',   '⚙️ SETTINGS']
 ];
@@ -50836,6 +50836,7 @@ function cosPaint(){
   else if(COS_TAB==='tasks') cosTaskTab(body);
   else if(COS_TAB==='today') cosTodayTab(body);
   else if(COS_TAB==='dwt')   cosDwtTab(body);
+  else if(COS_TAB==='drep')  cosDrepTab(body);
   else if(COS_TAB==='set')   cosSetTab(body);
   else if(COS_TAB==='rep')   cosRepTab(body);
   else                       cosPayTab(body);
@@ -51460,10 +51461,26 @@ function cdBlock(title,icon,list,colour,note,moms,days){
     '</div></div>';
 }
 function cosTodayTab(body){
-  var D=cdDay(), B=cdBuckets(), M=cdMomItems(D), DL=cdDailyItems(D);
+  var D=cdDay();
+  /* today's board carries the Daily Work To Do forward by itself, so nothing pending is missed */
+  try{ if(D===today()&&typeof dwtInitDay==='function')dwtInitDay(D); }catch(e){}
+  var B=cdBuckets(), M=cdMomItems(D), DL=cdDailyItems(D);
   var dlOpen=DL.filter(function(r){ return r.status!=='Done'&&r.status!=='Cancelled'; });
   var dlShut=DL.filter(function(r){ return r.status==='Done'||r.status==='Cancelled'; });
-  var openN=B.due.length+B.late.length+B.today.length+B.moved.length+M.due.length+M.late.length+dlOpen.length;
+  /* a daily line past its target date is overdue, wherever it sits */
+  var dlLate=dlOpen.filter(function(r){ return r.tgt&&String(r.tgt)<D; });
+  var dlDue=dlOpen.filter(function(r){ return !(r.tgt&&String(r.tgt)<D); });
+  var have={}; DL.forEach(function(r){ have[String(r.work||'').trim().toLowerCase()+'|'+String(r.proj||'')]=1; });
+  (COS.dwt||[]).forEach(function(r){
+    if(r._del||r.d>=D||!String(r.work||'').trim())return;
+    if(r.status==='Done'||r.status==='Cancelled')return;
+    if(!(r.tgt&&String(r.tgt)<D))return;
+    if(CD.proj&&String(r.proj||'')!==CD.proj)return;
+    if(CD.poc&&String(r.by||'')!==CD.poc)return;
+    var k=String(r.work||'').trim().toLowerCase()+'|'+String(r.proj||'');
+    if(have[k])return; have[k]=1; dlLate.push(r);
+  });
+  var openN=B.due.length+B.late.length+B.today.length+B.moved.length+M.due.length+M.late.length+dlOpen.length+dlLate.length;
   body.innerHTML=
     '<div class="cos-card"><div class="cos-ch">'+
       '<h3>📅 '+E(dLong(D))+'</h3><span class="hint">the day’s board — all projects</span>'+
@@ -51480,8 +51497,8 @@ function cosTodayTab(body){
         '<div><label class="fl">POC / Responsible</label><select id="cdC">'+selOpts(COS.lists.poc,CD.poc,'Everyone')+'</select></div>'+
       '</div>'+
       '<div class="kpi" style="margin:13px 0 0">'+
-        '<div class="b" style="border-left-color:#b02a2a"><div class="n">'+(B.late.length+M.late.length)+'</div><div class="l">Overdue</div></div>'+
-        '<div class="b" style="border-left-color:#d99a2b"><div class="n">'+(B.due.length+M.due.length+dlOpen.length)+'</div><div class="l">Due this day</div></div>'+
+        '<div class="b" style="border-left-color:#b02a2a"><div class="n">'+(B.late.length+M.late.length+dlLate.length)+'</div><div class="l">Overdue</div></div>'+
+        '<div class="b" style="border-left-color:#d99a2b"><div class="n">'+(B.due.length+M.due.length+dlDue.length)+'</div><div class="l">Due this day</div></div>'+
         '<div class="b" style="border-left-color:#5b47a0"><div class="n">'+(M.due.length+M.late.length)+'</div><div class="l">From MOM</div></div>'+
         '<div class="b" style="border-left-color:#9a6410"><div class="n">'+DL.length+'</div><div class="l">Daily work list</div></div>'+
         '<div class="b"><div class="n">'+B.today.length+'</div><div class="l">Opened this day</div></div>'+
@@ -51489,8 +51506,8 @@ function cosTodayTab(body){
       '</div>'+
       '<div id="cdForm" style="margin-top:12px"></div>'+
     '</div></div>'+
-    cdBlock('Overdue — carried from before','🔴',B.late,'#b02a2a','past their target date',M.late)+
-    cdBlock('Due today','🟠',B.due,'#d99a2b','target date is this day',M.due,dlOpen)+
+    cdBlock('Overdue — carried from before','🔴',B.late,'#b02a2a','past their target date',M.late,dlLate)+
+    cdBlock('Due today','🟠',B.due,'#d99a2b','target date is this day',M.due,dlDue)+
     cdBlock('Opened today','🔵',B.today,'#2c6fa8','raised on this day')+
     cdBlock('Touched today','✍️',B.moved,'#5b47a0','updated on this day')+
     cdBlock('Closed today','🟢',B.done,'#1c7a42','finished or cancelled',null,dlShut)+
@@ -52564,6 +52581,49 @@ function payRows(){
 function payOpen(p){ return p.status!=='Paid'&&p.status!=='Rejected'; }
 function payAge(p){ return p.date?Math.max(0,daysBetween(p.date,today())):0; }
 
+/* ---------- the payable ledger, read from Finance ---------- */
+function payLedgerData(){ try{ return (typeof window.__finPayable==='function')?window.__finPayable():null; }catch(e){ return null; } }
+function payLedgerTable(list,label,total,cls){
+  var R='text-align:right', B='text-align:right;font-weight:800';
+  return '<table class="'+(cls||'cos-t')+'" style="width:100%"><thead><tr><th>'+E(label)+'</th><th style="'+R+';width:70px">Lines</th>'+
+    '<th style="'+R+';width:140px">Bill Received</th><th style="'+R+';width:140px">Bill Paid</th><th style="'+R+';width:140px">Balance payable</th></tr></thead><tbody>'+
+    (list.length?list.map(function(x){ return '<tr><td><b>'+E(x.name)+'</b></td><td style="'+R+';color:#6d8199">'+x.n+'</td>'+
+      '<td style="'+R+';color:#1c7a42;font-weight:700">'+money(x.rec)+'</td><td style="'+R+';color:#b02a2a;font-weight:700">'+money(x.paid)+'</td>'+
+      '<td style="'+B+(x.bal<0?';color:#b02a2a':'')+'">'+money(x.bal)+'</td></tr>'; }).join('')
+      :'<tr><td colspan="5" class="empty">Nothing in Finance yet.</td></tr>')+
+    (list.length?('<tr><td style="font-weight:800;background:#f2f5f8">TOTAL</td><td style="'+R+';background:#f2f5f8;font-weight:700">'+total.lines+'</td>'+
+      '<td style="'+B+';background:#f2f5f8;color:#1c7a42">'+money(total.tot.rec)+'</td><td style="'+B+';background:#f2f5f8;color:#b02a2a">'+money(total.tot.paid)+'</td>'+
+      '<td style="'+B+';background:#f2f5f8">'+money(total.tot.bal)+'</td></tr>'):'')+
+    '</tbody></table>';
+}
+function payLedgerCard(){
+  var d=payLedgerData();
+  var when=d&&d.at?(' \u00b7 as at '+dShort(isoDay(new Date(d.at)))):'';
+  return '<div class="cos-card" id="payLedger"><div class="cos-ch"><h3>\uD83D\uDCB5 Total Payable Ledger</h3>'+
+      '<span class="hint">from Finance \u2014 every bill received and every payment made, contractor / vendor wise'+E(when)+'</span><span class="sp"></span>'+
+      '<button class="g" id="cosPlOpen">Open Finance</button><button class="p" id="cosPlPrint">\uD83D\uDDA8 Print ledger</button></div>'+
+    '<div class="cos-cb">'+
+      (d?('<div class="kpi" style="margin-bottom:12px">'+
+        '<div class="b" style="border-left-color:#1c7a42"><div class="n">Rs '+money(d.tot.rec)+'</div><div class="l">Bills received</div></div>'+
+        '<div class="b" style="border-left-color:#b02a2a"><div class="n">Rs '+money(d.tot.paid)+'</div><div class="l">Bills paid</div></div>'+
+        '<div class="b" style="border-left-color:#1d5a8f"><div class="n">Rs '+money(d.tot.bal)+'</div><div class="l">Total payable</div></div>'+
+        '<div class="b" style="border-left-color:#5b47a0"><div class="n">'+d.byVendor.length+'</div><div class="l">Vendors</div></div></div>'+
+        '<div class="cos-tw">'+payLedgerTable(d.byVendor,'Contractor / Vendor',d)+'</div>'+
+        '<div style="font-size:.74rem;font-weight:800;color:#12283f;margin:14px 0 6px">\uD83C\uDFD7 By project</div>'+
+        '<div class="cos-tw">'+payLedgerTable(d.byProject,'Project',d)+'</div>')
+        :'<div class="empty">Finance has no data on this computer yet \u2014 open Finance once, or press \u21BB Refresh.</div>')+
+    '</div></div>';
+}
+function payLedgerPrint(){
+  var d=payLedgerData(); if(!d){ T('Finance has no data here yet.'); return; }
+  cosPrint('Total Payable Ledger \u2014 '+dLong(today()),
+    '<div class="kpi"><div class="b"><div class="n">Rs '+money(d.tot.rec)+'</div><div class="l">Bills received</div></div>'+
+      '<div class="b"><div class="n">Rs '+money(d.tot.paid)+'</div><div class="l">Bills paid</div></div>'+
+      '<div class="b"><div class="n">Rs '+money(d.tot.bal)+'</div><div class="l">Total payable</div></div></div>'+
+    '<h2>Contractor / Vendor</h2>'+payLedgerTable(d.byVendor,'Contractor / Vendor',d,'')+
+    '<h2>By project</h2>'+payLedgerTable(d.byProject,'Project',d,'')+
+    '<div class="sig"><div>Prepared by</div><div>Checked by</div><div>Approved by</div></div>',false);
+}
 function cosPayTab(body){
   var list=payRows(), all=COS.pay||[];
   var openR=all.filter(payOpen);
@@ -52621,7 +52681,7 @@ function cosPayTab(body){
       '</tbody></table></div>'+
       '<div style="font-size:.72rem;color:#6d8199;margin-top:9px">'+list.length+' of '+all.length+' · shown total <b>Rs '+
         money(list.reduce(function(s,p){ return s+num(p.amount); },0))+'</b></div>'+
-    '</div></div>';
+    '</div></div>'+payLedgerCard();
 
   var q=body.querySelector('#pfQ');
   if(q){ var qt=null; q.addEventListener('input',function(){ clearTimeout(qt); qt=setTimeout(function(){
@@ -52641,6 +52701,8 @@ function cosPayTab(body){
     });
   }; });
   body.querySelector('#pyPrint').onclick=function(){ payPrint(list); };
+  if(body.querySelector('#cosPlPrint'))body.querySelector('#cosPlPrint').onclick=function(){ payLedgerPrint(); };
+  if(body.querySelector('#cosPlOpen'))body.querySelector('#cosPlOpen').onclick=function(){ try{ window.openFinance&&window.openFinance(); }catch(e){} };
   body.querySelector('#pyCsv').onclick=function(){
     cosCsv('COS_Payment_Issues_'+today()+'.csv',
       ['S.#','Date','Project','Party / Vendor','Bill / Ref','Amount','What is holding it','Raised by','With whom','Expected','Status','Remarks','Days open'],
@@ -53401,6 +53463,173 @@ window.__cosKit={
   setUser:function(u){ COSU=u; try{ sessionStorage.setItem(COS_SESS,JSON.stringify({id:u.id,name:u.name})); }catch(e){} },
   signOut:function(){ COSU=null; try{ sessionStorage.removeItem(COS_SESS); }catch(e){} }
 };
+
+
+/* ================= DAILY REPORT — the printable sheet =================
+   Today's Tasks / Work To do · Previous Tasks · Tasks By Name — the way the
+   office sheet reads, from everything on the register (tasks, MOM points and
+   the Daily Work To Do) for one day. Nothing is typed here; it only prints. */
+var DR={d:'',proj:'',st:'open',poc:''};
+var DR_ST=[['open','All pending (Open + In Progress + On Hold)'],['Open','Open only'],['In Progress','In Progress'],['On Hold','On Hold'],['Completed','Completed / Done'],['Cancelled','Cancelled'],['all','Everything']];
+function drStOk(x){
+  if(DR.st==='all')return true;
+  if(DR.st==='open')return drOpen(x);
+  return String(x.status||'Open')===DR.st;
+}
+function drDay(){ return DR.d||today(); }
+function drNames(){
+  var seen={}, out=[];
+  (COS.lists&&COS.lists.poc||[]).concat(taskAll().map(function(x){ return x.poc; })).forEach(function(v){ v=String(v||'').trim(); if(!v||seen[v.toLowerCase()])return; seen[v.toLowerCase()]=1; out.push(v); });
+  return out.sort(function(a,b){ return a.localeCompare(b); });
+}
+function drStLabel(){ var o=DR_ST.filter(function(z){ return z[0]===DR.st; })[0]; return o?o[1]:''; }
+function drOpen(x){ return x.status!=='Completed'&&x.status!=='Cancelled'; }
+function drItems(D){
+  var all=taskAll().filter(function(x){
+    if(!drStOk(x))return false;
+    if(DR.proj&&String(x.project||'').trim()!==DR.proj)return false;
+    if(DR.poc&&String(x.poc||'').trim()!==DR.poc)return false;
+    if(x.src==='daily'){
+      var r=x.raw||{};
+      if(r.d===D)return true;
+      /* a daily line from an earlier day still pending and past its target — unless today's list already carries it */
+      if(r.d<D&&r.tgt&&String(r.tgt)<D)return true;
+      return false;
+    }
+    return true;
+  });
+  /* carried copies of the same daily work are shown once */
+  var seen={}, out=[];
+  all.sort(function(a,b){ return (a.src==='daily'&&(a.raw||{}).d===D)?-1:((b.src==='daily'&&(b.raw||{}).d===D)?1:0); })
+     .forEach(function(x){
+       if(x.src==='daily'){ var k='d|'+String(x.detail||'').trim().toLowerCase()+'|'+String(x.project||''); if(seen[k])return; seen[k]=1; }
+       out.push(x);
+     });
+  var raised=function(x){ return x.src==='daily'?((x.raw||{}).raised||x.date||''):(x.date||''); };
+  var todayL=[], prevL=[];
+  out.forEach(function(x){
+    var r=raised(x), tg=drTarget(x);
+    if(r===D||(tg&&String(tg)===D))todayL.push(x);
+    else if(!r||r<D)prevL.push(x);
+    else todayL.push(x);                       /* a future-dated item that is somehow open — keep it in view */
+  });
+  var byOrder=function(a,b){ return drTarget(a).localeCompare(drTarget(b))||String(a.project||'').localeCompare(String(b.project||''))||String(a.detail||'').localeCompare(String(b.detail||'')); };
+  todayL.sort(byOrder); prevL.sort(byOrder);
+  var byName={}, names=[];
+  out.forEach(function(x){ var n=String(x.poc||'').trim()||'(no name)'; if(!byName[n]){ byName[n]=[]; names.push(n); } byName[n].push(x); });
+  names.sort(function(a,b){ return a==='(no name)'?1:(b==='(no name)'?-1:a.localeCompare(b)); });
+  names.forEach(function(n){ byName[n].sort(byOrder); });
+  return {today:todayL,prev:prevL,names:names,byName:byName};
+}
+/* a daily line's target is the one written on it — the day it sits on is not a target */
+function drTarget(x){ return x.src==='daily'?String((x.raw||{}).tgt||''):String(x.target||''); }
+function drTarget(x){ return x.src==='daily'?String((x.raw||{}).tgt||''):String(x.target||''); }
+function drCell(v,cls){ return '<td class="'+(cls||'')+'">'+v+'</td>'; }
+/* one line: Task Name · Dead Line · (POC) · Status */
+function drLine(x,D,withPoc){
+  var tg=drTarget(x), late=tg&&tg<D&&drOpen(x);
+  var extra=[]; if(x.project)extra.push(x.project); if(x.src==='mom')extra.push(x.ref||'MOM'); if(x.sub)extra.push(x.sub);
+  var st=String(x.status||'Open'), stc=st==='Completed'?'dr-ok':(st==='Cancelled'?'dr-x':(late?'dr-late':''));
+  return '<tr>'+drCell(E(x.detail||'')+(extra.length?('<div class="dr-m">'+E(extra.join(' · '))+'</div>'):''),'dr-t')+
+    drCell(tg?(E(dShort(tg))+(late?'<div class="dr-m dr-late">overdue</div>':'')):'—','dr-d')+
+    (withPoc?drCell(E(x.poc||'—'),'dr-p'):'')+
+    drCell(E(st),'dr-s '+stc)+'</tr>';
+}
+/* a block: the label on the left runs down every row of it, the way the sheet is ruled */
+function drBlock(label,heads,bodyRows,minRows,forPrint){
+  var n=Math.max(bodyRows.length,minRows||3);
+  var rows=bodyRows.slice();
+  var cls={'Task Name':'dr-t','Dead Line':'dr-d','POC':'dr-p','Status':'dr-s'};
+  for(var i=rows.length;i<n;i++)rows.push('<tr>'+heads.map(function(h){ return '<td class="'+(cls[h]||'')+'">&nbsp;</td>'; }).join('')+'</tr>');
+  var head='<tr>'+heads.map(function(h){ return '<th>'+E(h)+'</th>'; }).join('')+'</tr>';
+  if(!forPrint){
+    /* on screen: one label cell running down the whole block */
+    head=head.replace('<tr>','<tr><td class="dr-l" rowspan="'+(n+1)+'">'+E(label)+'</td>');
+    return '<table class="dr"><tbody>'+head+rows.join('')+'</tbody></table>';
+  }
+  /* for paper: the label column is repeated on every row (without the inner rules) so a long block
+     can break across pages instead of being pushed whole onto the next one */
+  var all=[head].concat(rows), last=all.length-1;
+  all=all.map(function(r,i){ return r.replace(/^<tr([^>]*)>/,'<tr$1><td class="dr-l dr-lr'+(i===0?' dr-lf':'')+(i===last?' dr-ll':'')+'">'+(i===0?E(label):'')+'</td>'); });
+  return '<table class="dr"><tbody>'+all.join('')+'</tbody></table>';
+}
+function drGroup(title,n){ return '<tr class="dr-g"><td colspan="3">'+E(title)+'<span class="dr-c">'+n+'</span></td></tr>'; }
+function drHTML(D,proj,forPrint){
+  var it=drItems(D);
+  var all=it.today.concat(it.prev);
+  var byOrder=function(a,b){ return drTarget(a).localeCompare(drTarget(b))||String(a.project||'').localeCompare(String(b.project||''))||String(a.detail||'').localeCompare(String(b.detail||'')); };
+  all.sort(byOrder);
+  /* 1 · everything */
+  var total=all.map(function(x){ return drLine(x,D,true); });
+  /* 2 · by POC */
+  var pocRows=[];
+  it.names.forEach(function(n){ pocRows.push(drGroup(n,it.byName[n].length)); it.byName[n].forEach(function(x){ pocRows.push(drLine(x,D,false)); }); });
+  /* 3 · by project */
+  var byP={}, projs=[];
+  all.forEach(function(x){ var k=String(x.project||'').trim()||'(no project)'; if(!byP[k]){ byP[k]=[]; projs.push(k); } byP[k].push(x); });
+  projs.sort(function(a,b){ return a==='(no project)'?1:(b==='(no project)'?-1:a.localeCompare(b)); });
+  var projRows=[];
+  projs.forEach(function(k){ projRows.push(drGroup(k,byP[k].length)); byP[k].forEach(function(x){ projRows.push(drLine(x,D,false)); }); });
+  /* 4 · dead line today */
+  var due=all.filter(function(x){ return drTarget(x)===D; }).map(function(x){ return drLine(x,D,false); });
+  return drBlock('Total Tasks',['Task Name','Dead Line','POC','Status'],total,3,forPrint)+
+    drBlock('Tasks By POC',['Task Name','Dead Line','Status'],pocRows,3,forPrint)+
+    drBlock('Tasks By Project',['Task Name','Dead Line','Status'],projRows,3,forPrint)+
+    drBlock('Tasks Dead line today',['Task Name','Dead Line','Status'],due,3,forPrint);
+}
+var DR_CSS=[
+  '@.dr{width:100%;border-collapse:collapse;font-size:.8rem;background:#fff;margin-bottom:16px}',
+  '@.dr td,@.dr th{border:1px solid #6d7b8a;padding:5px 8px;vertical-align:top;text-align:left}',
+  '@.dr th{font-weight:700;color:#12283f;background:#fff;font-size:.8rem}',
+  '@.dr .dr-l{width:150px;text-align:center;vertical-align:middle;font-weight:700;color:#12283f;font-size:.9rem;background:#fff}',
+  '@.dr .dr-t{color:#12283f}',
+  '@.dr .dr-d{width:110px;white-space:nowrap}',
+  '@.dr .dr-p{width:150px}',
+  '@.dr .dr-s{width:110px;white-space:nowrap}',
+  '@.dr .dr-m{font-size:.68rem;color:#6d8199;margin-top:2px}',
+  '@.dr .dr-late{color:#b02a2a;font-weight:700}@.dr .dr-ok{color:#1c7a42;font-weight:700}@.dr .dr-x{color:#6b7a89}',
+  '@.dr .dr-g td{background:#f2f5f8;font-weight:800;color:#1d5a8f}',
+  '@.dr .dr-c{display:inline-block;margin-left:8px;background:#12283f;color:#fff;border-radius:999px;padding:0 7px;font-size:.66rem;font-weight:800}'
+].join('\n');
+function drCss(scope){ return DR_CSS.split('@').join(scope||''); }
+function cosDrepTab(body){
+  var D=drDay();
+  body.innerHTML=
+    '<style>'+drCss('#cosOv ')+'</style>'+
+    '<div class="cos-card"><div class="cos-ch"><h3>\uD83D\uDDA8 Daily Report</h3>'+
+      '<span class="hint">Total Tasks \u00b7 Tasks By POC \u00b7 Tasks By Project \u00b7 Tasks Dead line today \u2014 from tasks, MOM points and the Daily Work To Do; this sheet only prints</span>'+
+      '<span class="sp"></span><button class="p" id="drPrint">\uD83D\uDDA8 Print</button></div>'+
+    '<div class="cos-cb"><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">'+
+      '<div><label class="fl">Day</label><div style="display:flex;gap:5px"><button class="g" id="drPrev" style="padding:6px 9px">\u2039</button>'+
+        '<input type="date" id="drD" value="'+E(D)+'"><button class="g" id="drNext" style="padding:6px 9px">\u203A</button><button class="g" id="drToday" style="padding:6px 9px">Today</button></div></div>'+
+      '<div><label class="fl">Project</label><select id="drP">'+selOpts(cosProjects(),DR.proj,'All projects')+'</select></div>'+
+      '<div><label class="fl">Status</label><select id="drS">'+DR_ST.map(function(o){ return '<option value="'+o[0]+'"'+(DR.st===o[0]?' selected':'')+'>'+o[1]+'</option>'; }).join('')+'</select></div>'+
+      '<div><label class="fl">Name / POC</label><select id="drC">'+selOpts(drNames(),DR.poc,'Everyone')+'</select></div>'+
+    '</div></div></div>'+
+    '<div class="cos-card"><div class="cos-cb" style="padding:14px 16px">'+
+      '<div style="display:flex;align-items:baseline;gap:12px;margin-bottom:10px"><div style="font-size:1.05rem;font-weight:800;color:#12283f">Daily Report \u2014 '+E(dLong(D))+'</div>'+
+      '<div style="font-size:.78rem;color:#6d8199">'+E(DR.proj||'all projects')+' \u00b7 '+E(drStLabel())+(DR.poc?(' \u00b7 '+E(DR.poc)):'')+'</div></div>'+
+      drHTML(D,DR.proj,false)+
+    '</div></div>';
+  var q=function(s){ return body.querySelector(s); };
+  q('#drD').addEventListener('change',function(){ DR.d=this.value||''; cosPaint(); });
+  q('#drPrev').onclick=function(){ var d=new Date(D); d.setDate(d.getDate()-1); DR.d=isoDay(d); cosPaint(); };
+  q('#drNext').onclick=function(){ var d=new Date(D); d.setDate(d.getDate()+1); DR.d=isoDay(d); cosPaint(); };
+  q('#drToday').onclick=function(){ DR.d=''; cosPaint(); };
+  q('#drP').addEventListener('change',function(){ DR.proj=this.value; cosPaint(); });
+  q('#drS').addEventListener('change',function(){ DR.st=this.value; cosPaint(); });
+  q('#drC').addEventListener('change',function(){ DR.poc=this.value; cosPaint(); });
+  q('#drPrint').onclick=function(){
+    cosPrint('Daily Report \u2014 '+dLong(D)+(DR.proj?(' \u00b7 '+DR.proj):'')+(DR.st!=='open'?(' \u00b7 '+drStLabel()):'')+(DR.poc?(' \u00b7 '+DR.poc):''),
+      '<style>@page{size:A4 landscape;margin:7mm} body{margin:0} .hd{margin-bottom:8px} '+drCss('')+
+        ' .dr{width:100%} .dr td,.dr th{font-size:11.5px;padding:5px 7px;-webkit-print-color-adjust:exact;print-color-adjust:exact}'+
+        ' .dr .dr-l{font-size:13px;width:120px} .dr .dr-d{width:96px} .dr .dr-p{width:130px} .dr .dr-s{width:90px} .dr .dr-m{font-size:9px}'+
+        ' .dr .dr-lr{border-top:none;border-bottom:none;vertical-align:top;padding-top:8px} .dr .dr-lf{border-top:1px solid #6d7b8a} .dr .dr-ll{border-bottom:1px solid #6d7b8a}'+
+        ' .dr{page-break-inside:auto} .dr tr{page-break-inside:avoid} .sig{margin-top:14px}</style>'+
+      drHTML(D,DR.proj,true)+
+      '<div class="sig"><div>Prepared by</div><div>Checked by</div><div>Approved by</div></div>',true);
+  };
+}
 
 })();
 
@@ -56921,12 +57150,23 @@ function finCss(){
   var k=K(); var base=k?k.css():'';
   var s=document.createElement('style'); s.id='finCss';
   s.textContent=base.replace(/#cosOv/g,'#finOv')+'\n'+[
+    '#finOv,#finOv input,#finOv select,#finOv textarea,#finOv button,#finCbPanel,#finImpOv{font-family:"Aptos Narrow","Arial Narrow","Aptos","Segoe UI",system-ui,sans-serif}',
+    '#finOv .cos-body{max-width:none;padding:12px 14px 40px}',                 /* the sheet uses the whole screen */
+    '#finOv table.fin-t{table-layout:auto;min-width:100%}',
+    '#finOv table.fin-t td:nth-child(3) input{min-width:220px}',
     '#finOv .cos-logo{display:inline-flex;align-items:center;background:#fff;border-radius:10px;padding:4px 10px;height:40px}',
     '#finOv .cos-logo img{height:30px;width:auto;display:block}',
     '#finOv .rep-pick{display:flex;gap:6px;flex-wrap:wrap}',
     '#finOv .rep-pick button{background:#eef3f8;border:1px solid #dde5ee;border-radius:9px;padding:7px 13px;font-size:.76rem;font-weight:700;color:#41586f;cursor:pointer}',
     '#finOv .rep-pick button.on{background:#12283f;border-color:#12283f;color:#fff}',
-    '#finOv table.fin-t td{padding:4px 5px;vertical-align:middle}',
+    '#finOv table.fin-t{border:1px solid #9fb0c2}',
+    '#finOv table.fin-t td{padding:3px 4px;vertical-align:middle;border:1px solid #b9c7d5}',
+    '#finOv table.fin-t th{border:1px solid #0b1a2c}',
+    '#finOv table.fin-t tbody tr:nth-child(even){background:#fff}',
+    '#finOv table.fin-t input,#finOv table.fin-t select{border-color:transparent;background:transparent}',
+    '#finOv table.fin-t input:hover,#finOv table.fin-t select:hover{border-color:#d5dfea;background:#fff}',
+    '#finOv table.fin-t input:focus,#finOv table.fin-t select:focus{border-color:#2c6fa8;background:#fff}',
+    '#finOv table.fin-t input:disabled,#finOv table.fin-t select:disabled{background:transparent;border-color:transparent}',
     '#finOv table.fin-t input,#finOv table.fin-t select{padding:5px 7px;font-size:.76rem;border-radius:7px;min-width:0}',
     '#finOv table.fin-t input.amt{text-align:right;font-weight:700;font-variant-numeric:tabular-nums}',
     '#finOv table.fin-t input:disabled,#finOv table.fin-t select:disabled{background:#f5f7fa;color:#41586f;border-color:#e6ecf2}',
@@ -56985,6 +57225,19 @@ function finOpen(){
 }
 function finClose(){ var ov=document.getElementById('finOv'); if(ov)ov.remove(); }
 window.openFinance=finOpen;
+/* the payable ledger for other modules (COS Data ▸ Payment issues): vendor by vendor, project by project */
+window.__finPayable=function(){
+  var st=FIN; if(!st){ st=finLoadLocal(); if(!FIN)try{ finReady(function(){}); }catch(e){} }
+  if(!st)return null;
+  var rows=(st.rows||[]).filter(function(r){ return !r._del&&(String(r.vendor||'').trim()||num(r.amount)); });
+  var keep=FIN; FIN=st;
+  try{
+    var byV=ledGroups(rows,'vendor'), byP=ledGroups(rows,'project'), tot=sumBy(rows);
+    return {byVendor:byV.map(function(x){ return {name:x.name,rec:x.rec,paid:x.paid,bal:x.bal,n:x.n}; }),
+            byProject:byP.map(function(x){ return {name:x.name,rec:x.rec,paid:x.paid,bal:x.bal,n:x.n}; }),
+            tot:tot, lines:rows.length, at:num(st._u)};
+  }finally{ FIN=keep; }
+};
 
 var FIN_TABS=[['io','💵 DAILY IN / OUT'],['led','📒 LEDGER'],['ven','🏢 VENDORS'],['rep','🖨 REPORTS'],['set','⚙️ SETTINGS']];
 function finPaint(){
@@ -57098,8 +57351,8 @@ function finIoTab(body){
     '<div class="cos-card"><div class="cos-ch"><h3>💵 Daily In / Out</h3>'+
       '<span class="hint">every bill received and every payment made — one line each</span><span class="sp"></span>'+
       '<button class="g" id="ioMode">'+(IO.all?'📅 One day':'📆 All dates')+'</button>'+
-      (finIsAdmin()?'<button class="g" id="ioSyncPb" title="Read every Progress Bill (and its payments) of V-Grand and Elevation into this sheet — nothing typed by hand is touched">⟳ From Progress Bills</button>':'')+
-      (finIsAdmin()?'<button class="g" id="ioImp" title="Read the Daily In Out sheet from Excel — master password">⬆ Import Excel</button>':'')+
+      (finIsAdmin()?'<button class="g" id="ioSyncPb" title="Read every Progress Bill (and its payments) of every project into this sheet — master password; nothing typed by hand is touched">🔒 From Progress Bills</button>':'')+
+      (finIsAdmin()?'<button class="g" id="ioImp" title="Read the Daily In Out sheet from Excel — master password">🔒 Import Excel</button>':'')+
       '<button class="g" id="ioXl" title="Daily In Out + Ledger, as Excel">⬇ Excel</button>'+
       '<button class="g" id="ioPrint">🖨 Print</button>'+
       (finCanEdit()&&!IO.all?(lk?'':'<button class="g" id="ioLock" style="border-color:#1f6b48;color:#1f6b48;font-weight:800">🔒 Save &amp; Lock</button>'):'')+
@@ -57177,7 +57430,12 @@ function finIoTab(body){
   on('#ioXl','click',function(){ finExcel(ioList(),IO.all?'':d); });
   on('#ioPrint','click',function(){ var l=ioList(); finPrintIo(l,sumBy(l),d); });
   on('#ioImp','click',function(){ finImportAsk(); });
-  on('#ioSyncPb','click',function(){ var r=finSyncBills(); finPaint(); T('⟳ Progress Bills: '+r.added+' new line'+(r.added===1?'':'s')+(r.updated?(', '+r.updated+' updated'):'')+'.'); });
+  on('#ioSyncPb','click',function(){
+    Promise.resolve(finMasterAsk('to read the Progress Bills into this sheet')).then(function(ok){
+      if(!ok)return;
+      var r=finSyncBills(); finPaint(); T('⟳ Progress Bills: '+r.added+' new line'+(r.added===1?'':'s')+(r.updated?(', '+r.updated+' updated'):'')+(r.removed?(', '+r.removed+' removed'):'')+'.');
+    });
+  });
   body.querySelectorAll('[data-god]').forEach(function(b){ b.onclick=function(){ IO.d=b.dataset.god; IO.all=false; finPaint(); }; });
 
   var tb=q('#ioBody');
