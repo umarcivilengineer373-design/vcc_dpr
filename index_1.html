@@ -41021,7 +41021,22 @@ function mrUserForm(idx){
       '<div class="field"><label>Password '+(idx>=0?'(leave blank to keep)':'<span style="font-weight:400;color:var(--muted)">(at least 4 characters)</span>')+'</label><input type="password" id="muPass" autocomplete="new-password"></div>'+
     '</div>'+
     muCanHTML(u)+
-    '<div style="font-weight:700;color:var(--navy);margin:14px 0 8px">Projects &amp; sheet access</div>'+projBlocks,
+    '<div style="font-weight:700;color:var(--navy);margin:14px 0 8px">Projects &amp; sheet access</div>'+projBlocks+
+    (function(){
+      var t=(u.access&&u.access.__tiles)||{};
+      var finR=(t.fin==='edit'||t.fin==='view')?t.fin:'';
+      return '<div style="font-weight:700;color:var(--navy);margin:14px 0 8px">Company registers</div>'+
+        '<div style="border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:8px;background:'+(t.cos?'#f3f8f4':'#fbfcfd')+'">'+
+          '<label style="display:flex;align-items:center;gap:8px;font-weight:700;color:var(--navy)"><input type="checkbox" id="muTileCos"'+(t.cos?' checked':'')+'> \uD83D\uDDC2\uFE0F COS Data'+
+          '<span style="font-size:.72rem;color:var(--muted);font-weight:500">MOM \u00B7 Tasks \u00B7 Daily Work To Do \u00B7 Payment issues \u2014 may add and edit; removing stays with Admins</span></label></div>'+
+        '<div style="border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:8px;background:'+(finR?'#f3f8f4':'#fbfcfd')+'">'+
+          '<label style="display:flex;align-items:center;gap:8px;font-weight:700;color:var(--navy)"><input type="checkbox" id="muTileFin"'+(finR?' checked':'')+'> \uD83D\uDCB5 Finance'+
+          '<span style="font-size:.72rem;color:var(--muted);font-weight:500">Daily In / Out \u00B7 Ledger \u00B7 Vendors \u00B7 Reports</span></label>'+
+          '<div id="muTileFinW" style="display:'+(finR?'block':'none')+';margin:8px 0 0 26px"><select id="muTileFinR" style="max-width:320px">'+
+            '<option value="view"'+(finR==='view'?' selected':'')+'>\uD83D\uDC41 View only \u2014 sheet, ledger, reports, print</option>'+
+            '<option value="edit"'+(finR==='edit'?' selected':'')+'>\u270E View + Edit \u2014 may post lines and lock days</option></select></div></div>'+
+        '<div style="font-size:.74rem;color:var(--muted)">An <b>Admin</b> opens both whatever is ticked here.</div>';
+    })(),
     '<span id="muErr" style="margin-right:auto;align-self:center;font-size:.8rem;font-weight:700;color:#c0392b"></span><button class="ghost" data-c="1">Cancel</button><button class="primary" id="muSave">💾 Save user</button>',900);
   ov.querySelector('[data-c]').onclick=function(){ ov.remove(); renderMasterSettings(); };
   if(ov.querySelector('#muDesigAdd'))ov.querySelector('#muDesigAdd').onclick=function(){
@@ -41031,6 +41046,7 @@ function mrUserForm(idx){
       d.value=cur;
     });
   };
+  (function(){ var c=ov.querySelector('#muTileFin'), w=ov.querySelector('#muTileFinW'); if(c&&w)c.onchange=function(){ w.style.display=c.checked?'block':'none'; }; })();
   ov.querySelectorAll('.mu-proj').forEach(function(cb){ cb.onchange=function(){
     var w=ov.querySelector('.mu-sheets[data-p="'+CSS.escape(cb.dataset.p)+'"]');
     if(w)w.style.display=cb.checked?'block':'none';
@@ -41052,7 +41068,9 @@ function mrUserForm(idx){
     var pass=String(ov.querySelector('#muPass').value||'').trim();
     if(idx<0&&pass.length<4){ muFail('Set a password of at least 4 characters.','muPass'); return; }
     if(idx>=0&&pass&&pass.length<4){ muFail('The new password must be at least 4 characters (leave it blank to keep the old one).','muPass'); return; }
-    if(![].some.call(ov.querySelectorAll('.mu-proj'),function(cb){return cb.checked})){ muFail('Tick at least one project for this user.'); return; }
+    var tileCos=!!(ov.querySelector('#muTileCos')&&ov.querySelector('#muTileCos').checked);
+    var tileFin=(ov.querySelector('#muTileFin')&&ov.querySelector('#muTileFin').checked)?String((ov.querySelector('#muTileFinR')||{}).value||'view'):'';
+    if(![].some.call(ov.querySelectorAll('.mu-proj'),function(cb){return cb.checked})&&!tileCos&&!tileFin){ muFail('Tick at least one project or register for this user.'); return; }
     var rec={ id:(idx>=0?u.id:('m'+Date.now().toString(36))), name:name,
       email:String(ov.querySelector('#muMail').value||'').trim(),
       role:ov.querySelector('#muRole').value, desig:ov.querySelector('#muDesig').value,
@@ -41077,6 +41095,8 @@ function mrUserForm(idx){
       });
       rec.subs[pid]=subs;
     } });
+    /* the company registers travel inside access, so they reach the database with the user */
+    if(tileCos||tileFin)rec.access.__tiles={cos:tileCos?1:0,fin:tileFin};
     var dd=mrLoad();
     if(idx>=0)dd.users[idx]=rec; else dd.users.push(rec);
     mrSave(dd,false,[rec]);
@@ -50413,6 +50433,8 @@ function cosNorm(o){
     o.lists[k]=o.lists[k].filter(function(v){ return typeof v==='string'&&v.trim(); });
   });
   o.seq   = Object.assign({mom:0,task:0,pay:0}, o.seq||{});
+  /* names removed from a list — remembered, so the removal reaches every device */
+  o.listsDel = (o.listsDel&&typeof o.listsDel==='object'&&!Array.isArray(o.listsDel))?o.listsDel:{};
   if(!o.users.some(function(u){ return String(u.user||'').toLowerCase()==='admin'; }))
     o.users.unshift(b.users[0]);
   return o;
@@ -50456,7 +50478,7 @@ function cosRows(){
   (COS.tasks||[]).forEach(function(r){ out.push({item_id:'task:'+r.id,data:r}); });
   (COS.pay||[]).forEach(function(r){ out.push({item_id:'pay:'+r.id,data:r}); });
   (COS.dwt||[]).forEach(function(r){ out.push({item_id:'dwt:'+r.id,data:r}); });
-  out.push({item_id:'lists',data:{lists:COS.lists,seq:COS.seq,dwtInit:COS.dwtInit,dwtLock:COS.dwtLock,_u:COS._u}});
+  out.push({item_id:'lists',data:{lists:COS.lists,listsDel:COS.listsDel||{},seq:COS.seq,dwtInit:COS.dwtInit,dwtLock:COS.dwtLock,_u:COS._u}});
   return out;
 }
 async function cosPush(only){
@@ -50489,7 +50511,11 @@ async function cosPull(){
       var id=String(row.item_id||''), d=row.data;
       if(!d)return;
       if(id==='lists'){
-        if(d.lists&&(!COS._u||num(d._u)>num(COS._u))){ COS.lists=Object.assign(COS.lists,d.lists); COS.seq=Object.assign(COS.seq,d.seq||{}); }
+        /* The lists are merged, not overwritten: a name added on any device stays,
+           and a name removed on any device (kept in listsDel with its time) goes —
+           unless it was added again later. So Settings reads the same everywhere. */
+        if(d.lists){ if(cosMergeLists(d.lists,d.listsDel||{}))n++; }
+        if(d.seq)Object.keys(d.seq).forEach(function(k){ COS.seq[k]=Math.max(num(COS.seq[k]),num(d.seq[k])); });
         if(d.dwtInit)COS.dwtInit=Object.assign(COS.dwtInit||{},d.dwtInit);
         if(d.dwtLock)COS.dwtLock=Object.assign(COS.dwtLock||{},d.dwtLock);
         return;
@@ -50515,6 +50541,30 @@ async function cosPull(){
     return {ok:true,n:n};
   }catch(e){ return {ok:false,reason:String(e&&e.message||e)}; }
 }
+function cosMergeLists(remote,remoteDel){
+  var changed=false;
+  COS.listsDel=COS.listsDel||{};
+  var keys={}; Object.keys(COS.lists||{}).concat(Object.keys(remote||{})).forEach(function(k){ keys[k]=1; });
+  Object.keys(keys).forEach(function(k){
+    var mine=Array.isArray(COS.lists[k])?COS.lists[k]:[], theirs=Array.isArray(remote[k])?remote[k]:[];
+    var del=Object.assign({},COS.listsDel[k]||{});
+    Object.keys((remoteDel||{})[k]||{}).forEach(function(nm){ del[nm]=Math.max(num(del[nm]),num(remoteDel[k][nm])); });
+    /* an add on either side after the removal wins over the removal */
+    var addAt={}; [mine,theirs].forEach(function(l){ l.forEach(function(v){ if(v&&typeof v==='object'&&v.n){ addAt[String(v.n).toLowerCase()]=Math.max(num(addAt[String(v.n).toLowerCase()]),num(v.t)); } }); });
+    var out=[], seen={};
+    var take=function(v){ v=(v&&typeof v==='object')?v.n:v; v=String(v==null?'':v).trim(); if(!v)return; var kk=v.toLowerCase(); if(seen[kk])return;
+      if(del[kk]&&num(del[kk])>=num(addAt[kk]||0))return; seen[kk]=1; out.push(v); };
+    mine.forEach(take); theirs.forEach(take);
+    var before=mine.map(function(v){ return (v&&typeof v==='object')?v.n:v; }).join('\u0001');
+    if(out.join('\u0001')!==before)changed=true;
+    COS.lists[k]=out;
+    COS.listsDel[k]=del;
+  });
+  return changed;
+}
+/* a name removed in Settings is remembered so the removal travels; adding it again clears that */
+function cosListDrop(k,v){ COS.listsDel=COS.listsDel||{}; COS.listsDel[k]=COS.listsDel[k]||{}; COS.listsDel[k][String(v).trim().toLowerCase()]=nowMs(); }
+function cosListKeep(k,v){ try{ delete COS.listsDel[k][String(v).trim().toLowerCase()]; }catch(e){} }
 /* every change: keep it here at once, and send it up right after */
 function cosSave(quiet){
   cosSaveLocal();
@@ -50693,6 +50743,9 @@ function selOpts(list,cur,blank){
 
 /* ================= the shell ================= */
 function cosOpen(){
+  /* even if the tile were reached some other way, only an Admin gets in */
+  try{ if(typeof cosTileAllowed==='function'&&!cosTileAllowed()){
+    T('\uD83D\uDD12 COS Data is open to Admins only.'); return; } }catch(e){}
   cosCss();
   cosReady(function(){
     var ov=document.getElementById('cosOv'); if(ov)ov.remove();
@@ -50725,6 +50778,10 @@ function cosOpen(){
         T(r[1]&&r[1].ok?('☁ Up to date'+(r[1].n?(' — '+r[1].n+' record'+(r[1].n===1?'':'s')+' came in'):'')):'⚠ The database did not answer.');
       });
     };
+    /* a user given COS Data in Master Settings walks in with the application's own sign-in — may add and edit, not remove */
+    try{ if(!COSU&&typeof window.__gloUser==='function'){ var gu=window.__gloUser();
+      if(gu&&gu.role!=='admin'){ var tl=(typeof window.__gloTiles==='function')?window.__gloTiles(gu):{};
+        if(tl.cos)COSU={id:'g_'+String(gu.dbId||gu.name),name:gu.name||'',role:'edit'}; } } }catch(e){}
     /* already signed in this session? */
     try{
       var raw=sessionStorage.getItem(COS_SESS);
@@ -51158,8 +51215,8 @@ function taskForm(id){
       if(txt)rec.updates=[{d:today(),t:txt,by:(COSU&&COSU.name)||''}];
       COS.tasks.push(rec);
     }
-    if(rec.location&&COS.lists.locations.indexOf(rec.location)<0)COS.lists.locations.push(rec.location);
-    if(rec.poc&&COS.lists.poc.indexOf(rec.poc)<0)COS.lists.poc.push(rec.poc);
+    if(rec.location&&COS.lists.locations.indexOf(rec.location)<0)COS.lists.locations.push(rec.location); cosListKeep('locations',rec.location);
+    if(rec.poc&&COS.lists.poc.indexOf(rec.poc)<0)COS.lists.poc.push(rec.poc); cosListKeep('poc',rec.poc);
     cosSave(); host.innerHTML=''; cosPaint();
     T(isNew?('✅ Task S.# '+rec.sno+' added.'):'✅ Task updated.');
   };
@@ -51472,8 +51529,8 @@ function cosTodayTab(body){
         priority:host.querySelector('#cnR').value,
         status:'Open',detail:w,remarks:'',updates:[],
         createdBy:(COSU&&COSU.name)||'',createdAt:nowMs(),_u:nowMs()};
-      if(rec.location&&COS.lists.locations.indexOf(rec.location)<0)COS.lists.locations.push(rec.location);
-      if(rec.poc&&COS.lists.poc.indexOf(rec.poc)<0)COS.lists.poc.push(rec.poc);
+      if(rec.location&&COS.lists.locations.indexOf(rec.location)<0)COS.lists.locations.push(rec.location); cosListKeep('locations',rec.location);
+      if(rec.poc&&COS.lists.poc.indexOf(rec.poc)<0)COS.lists.poc.push(rec.poc); cosListKeep('poc',rec.poc);
       COS.tasks.push(rec); cosSave(); cosPaint(); T('✅ Task S.# '+rec.sno+' added.');
     };
   };
@@ -51701,7 +51758,7 @@ function cosPeople(){
 function cosPeopleAdd(n){
   n=String(n||'').trim(); if(!n)return;
   cosPeople();
-  if(COS.lists.people.indexOf(n)<0){ COS.lists.people.push(n); cosSave(true); }
+  if(COS.lists.people.indexOf(n)<0){ COS.lists.people.push(n); cosListKeep('people',n); cosSave(true); }
 }
 /* ---------- who may unlock a locked sheet ---------- */
 function cosAdminPass(plain){
@@ -52073,7 +52130,7 @@ function momWire(pane,m){
         try{ var o=pane.querySelector('#meSel option[value="'+m.id+'"]');
           if(o)o.textContent=(m.locked?'🔒 ':'')+(m.ref||'MOM')+'  ·  '+dShort(m.date)+'  ·  '+(m.agenda||'(new sheet)'); }catch(e){}
       }
-      if(id==='mhV'&&m.venue&&COS.lists.locations.indexOf(m.venue)<0)COS.lists.locations.push(m.venue);
+      if(id==='mhV'&&m.venue&&COS.lists.locations.indexOf(m.venue)<0)COS.lists.locations.push(m.venue); cosListKeep('locations',m.venue);
       m._u=nowMs(); cosSave(true);
     };
     el.addEventListener('change',put);
@@ -52634,8 +52691,8 @@ function payForm(id){
     rec.remarks= String(host.querySelector('#pqM').value||'').trim();
     rec._u=nowMs();
     if(isNew){ COS.seq.pay=num(COS.seq.pay)+1; rec.sno=COS.seq.pay; COS.pay.push(rec); }
-    if(rec.party&&COS.lists.party.indexOf(rec.party)<0)COS.lists.party.push(rec.party);
-    if(rec.owner&&COS.lists.poc.indexOf(rec.owner)<0)COS.lists.poc.push(rec.owner);
+    if(rec.party&&COS.lists.party.indexOf(rec.party)<0)COS.lists.party.push(rec.party); cosListKeep('party',rec.party);
+    if(rec.owner&&COS.lists.poc.indexOf(rec.owner)<0)COS.lists.poc.push(rec.owner); cosListKeep('poc',rec.owner);
     cosSave(); host.innerHTML=''; cosPaint();
     T(isNew?('✅ Issue S.# '+rec.sno+' recorded.'):'✅ Saved.');
   };
@@ -52843,9 +52900,21 @@ function cosTileHTML(){
     '<span class="t"><span class="n">COS Data</span><span class="s">'+E(note)+'</span></span>'+
     '<span class="go">›</span></button>';
 }
+/* COS Data is for the Admins alone — nobody else is even shown the tile */
+function cosTileAllowed(){
+  try{ if(typeof window.__gloIsAdmin==='function'&&window.__gloIsAdmin())return true; }catch(e){}
+  /* or a user given COS Data in Master Settings ▸ Add / Edit user */
+  try{ if(typeof window.__gloUser==='function'&&window.__gloUser()){ var t=(typeof window.__gloTiles==='function')?window.__gloTiles():{}; return !!t.cos; } }catch(e){}
+  try{ if(typeof currentUser!=='undefined'&&currentUser)return currentUser.role==='admin'; }catch(e){}
+  return false;
+}
 function cosTile(){
   var box=document.getElementById('lgPickList'); if(!box)return;
   var grid=box.querySelector('.lg-grid'); if(!grid)return;
+  if(!cosTileAllowed()){
+    grid.querySelectorAll('[data-cosdata]').forEach(function(b){ b.remove(); });
+    return;
+  }
   if(grid.querySelector('[data-cosdata]'))return;
   var wrap=document.createElement('div');
   wrap.innerHTML=cosTileHTML();
@@ -53292,7 +53361,7 @@ function cosSetTab(body){
       var dup=l.some(function(x){ return String(x).toLowerCase()===v.toLowerCase(); })||
               (k==='projects'&&csAppProjects().some(function(x){ return x.toLowerCase()===v.toLowerCase(); }));
       if(dup){ T('“'+v+'” is already on the list.'); return; }
-      l.push(v); COS._u=nowMs(); cosSave(); cosPaint();
+      l.push(v); cosListKeep(k,v); COS._u=nowMs(); cosSave(); cosPaint();
       T('✅ “'+v+'” added.');
     });
   }; });
@@ -53302,7 +53371,7 @@ function cosSetTab(body){
       v=String(v==null?'':v).trim(); if(!v||v===from)return;
       var l=csList(k), i=l.indexOf(from);
       if(i<0)return;
-      l[i]=v;
+      l[i]=v; cosListDrop(k,from); cosListKeep(k,v);
       var n=csRename(k,from,v);
       COS._u=nowMs(); cosSave(); cosPaint();
       T('✎ Renamed'+(n?(' · '+n+' record'+(n===1?'':'s')+' updated'):'')+'.');
@@ -53315,12 +53384,23 @@ function cosSetTab(body){
       (n?('\n\nIt is on '+n+' record'+(n===1?'':'s')+' — those keep the name, it simply stops being offered in the dropdown.'):''),
       'Remove').then(function(ok){
         if(!ok)return;
-        COS.lists[k]=csList(k).filter(function(x){ return x!==v; });
+        COS.lists[k]=csList(k).filter(function(x){ return x!==v; }); cosListDrop(k,v);
         COS._u=nowMs(); cosSave(); cosPaint();
         T('Removed from the list.');
       });
   }; });
 }
+
+/* ---------- what the sister module (Finance) borrows from here ---------- */
+window.__cosKit={
+  css:function(){ return COS_CSS+'\n'+((typeof COS_CSS2==='string')?COS_CSS2:''); },
+  print:cosPrint, csv:cosCsv, selOpts:selOpts, pass:cosPass, adminPass:cosAdminPass,
+  admins:cosAdmins, findUser:cosFindUser, hp:hp, pill:pill, allowed:cosTileAllowed,
+  sessKey:COS_SESS,
+  user:function(){ return COSU; },
+  setUser:function(u){ COSU=u; try{ sessionStorage.setItem(COS_SESS,JSON.stringify({id:u.id,name:u.name})); }catch(e){} },
+  signOut:function(){ COSU=null; try{ sessionStorage.removeItem(COS_SESS); }catch(e){} }
+};
 
 })();
 
@@ -54498,6 +54578,16 @@ function gloSet(u){
   try{ if(u)sessionStorage.setItem(GU_KEY,JSON.stringify(u)); else sessionStorage.removeItem(GU_KEY); }catch(e){}
 }
 function gloAdmin(u){ u=u||gloUser(); return !!(u&&u.role==='admin'); }
+/* COS Data / Finance ticked for this person in Master Settings (they travel inside access.__tiles) */
+function gloTiles(u){ u=u||gloUser(); try{ var t=u&&u.access&&u.access.__tiles; return (t&&typeof t==='object')?t:{}; }catch(e){ return {}; } }
+try{ window.__gloTiles=gloTiles; }catch(e){}
+/* COS Data is an Admin-only tile — the rest of the app asks through this */
+try{ window.__gloIsAdmin=function(){
+  var u=gloUser();
+  if(u)return gloAdmin(u);
+  try{ if(typeof currentUser!=='undefined'&&currentUser)return currentUser.role==='admin'; }catch(e){}
+  return false;
+}; }catch(e){}
 
 /* which projects this person may open — no list at all means every project */
 function gloProjects(u){
@@ -54704,7 +54794,15 @@ function gloTrimPicker(){
   grid.querySelectorAll('.lg-proj[data-pid]').forEach(function(b){
     if(allow[b.dataset.pid])left++; else b.remove();
   });
-  if(!left&&!grid.querySelector('[data-cosdata]')){
+  /* COS Data belongs to the Admins alone */
+  if(!gloAdmin(u)){
+    /* the company registers: given per user in Master Settings ▸ Add / Edit user */
+    var t=gloTiles(u);
+    if(!t.cos)grid.querySelectorAll('[data-cosdata]').forEach(function(b){ b.remove(); });
+    var finOk=!!t.fin; try{ if(!finOk)finOk=!!(window.__finAccessOk&&window.__finAccessOk(u)); }catch(e){}
+    if(!finOk)grid.querySelectorAll('[data-findata]').forEach(function(b){ b.remove(); });
+  }
+  if(!left&&!grid.querySelector('[data-cosdata],[data-findata]')){
     var d=document.createElement('div');
     d.style.cssText='font-size:.82rem;color:var(--muted);padding:14px;text-align:center';
     d.textContent='No project has been given to this account yet — ask an admin in Master Settings.';
@@ -54830,6 +54928,7 @@ window.gloUser=gloUser;
 
 /* the letterhead mark, shared with the reports that need it */
 try{ window.__VCC_LOGO__=GLO_LOGO; }catch(e){}
+try{ window.__gloUser=gloUser; }catch(e){}
 })();
 
 </script>
@@ -55816,6 +55915,1879 @@ function paBoot(){
 document.addEventListener('DOMContentLoaded',paBoot);
 setTimeout(paBoot,1200);
 setInterval(paBoot,2500);
+})();
+
+</script>
+<script id="prgIoMod">
+/* ==================================================================
+   PROGRESS — Export and Import the whole measured record
+   One sheet carries every day's measurement. The export is the same
+   shape the import reads, so a file can go out, be worked on in Excel,
+   and come straight back. The import is behind the MASTER password.
+   ================================================================== */
+(function(){
+'use strict';
+
+function E(id){ return document.getElementById(id); }
+function X(s){ try{ return esc(s); }catch(e){ return String(s==null?'':s); } }
+function T(m){ try{ toast(m); }catch(e){} }
+function N(v){ var n=parseFloat(String(v==null?'':v).replace(/[, ]/g,'')); return isFinite(n)?n:0; }
+function S2(v){ return String(v==null?'':v).trim(); }
+function ISOd(v){
+  if(v==null||v==='')return '';
+  if(v instanceof Date&&!isNaN(v))return iso(v);
+  var s=String(v).trim();
+  if(/^\d{4}-\d{2}-\d{2}/.test(s))return s.slice(0,10);
+  if(/^\d{5}$/.test(s)){ var d=new Date(Date.UTC(1899,11,30)+(+s)*86400000); if(!isNaN(d))return iso(d); }
+  var MON={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,sept:9,oct:10,nov:11,dec:12};
+  var m=s.match(/^(\d{1,2})[-\/\s]([A-Za-z]{3,4})[-\/\s](\d{2,4})$/);
+  if(m){ var mo=MON[m[2].toLowerCase()]||MON[m[2].toLowerCase().slice(0,3)];
+    if(mo){ var y=+m[3]<100?2000+ +m[3]:+m[3];
+      return y+'-'+String(mo).padStart(2,'0')+'-'+String(+m[1]).padStart(2,'0'); } }
+  m=s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{2,4})$/);
+  if(m){ var a1=+m[1], b1=+m[2]; if(a1<=12&&b1>12){ m=[m[0],m[2],m[1],m[3]]; } }   /* 9/25/26 can only be m/d/y */
+  if(m){ var y2=+m[3]<100?2000+ +m[3]:+m[3];
+    return y2+'-'+String(+m[2]).padStart(2,'0')+'-'+String(+m[1]).padStart(2,'0'); }
+  var d2=new Date(s); return isNaN(d2)?'':iso(d2);
+}
+
+var PG_COLS=['Date','BOQ ID','Item Description','Group','Sub Head','Floor','Unit',
+             'No','Length','Breadth','Height','Quantity'];
+
+/* ---------------- what is on record ---------------- */
+function pgRows(){
+  var out=[];
+  var byId={}; try{ (S.boq||[]).forEach(function(b){ byId[b.id]=b; }); }catch(e){}
+  var days=[]; try{ days=Object.keys(S.days||{}).filter(function(k){ return /^\d{4}-\d{2}-\d{2}$/.test(k); }).sort(); }catch(e){}
+  days.forEach(function(d){
+    ((S.days[d]&&S.days[d].progress)||[]).forEach(function(p){
+      var b=byId[p.boqId]||{};
+      out.push([d, p.boqId||'', b.name||'', p.group||b.group||'', p.sub||b.sub||'',
+                p.floor||b.floor||'', b.unit||'',
+                p.no===''||p.no==null?'':N(p.no),
+                p.len===''||p.len==null?'':N(p.len),
+                p.br===''||p.br==null?'':N(p.br),
+                p.ht===''||p.ht==null?'':N(p.ht),
+                N(p.qty)]);
+    });
+  });
+  return out;
+}
+
+/* ---------------- export ---------------- */
+function pgExport(){
+  var rows=pgRows();
+  if(!rows.length){ T('No measurement on record yet.'); return; }
+  var proj=''; try{ proj=(PROJ&&PROJ.name)||(S.settings&&S.settings.project)||'project'; }catch(e){ proj='project'; }
+  var boq=[]; try{ boq=(S.boq||[]).map(function(b){
+    return [b.id||'', b.name||'', b.group||'', b.sub||'', b.floor||'', b.unit||'', N(b.qty), N(b.rate)]; }); }catch(e){}
+  try{
+    var sheets=[
+      xlsxSheet({ raw:true, name:'Progress', head:PG_COLS,
+        align:['d','b','l','l','l','l','c','n','n','n','n','n'], rows:rows }),
+      xlsxSheet({ raw:true, name:'BOQ', head:['BOQ ID','Item Description','Group','Sub Head','Floor','Unit','BOQ Qty','Rate'],
+        align:['b','l','l','l','l','c','n','m'], rows:boq })
+    ];
+    var name='Progress-'+String(proj).replace(/[^A-Za-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,28)+'-'+iso(new Date())+'.xlsx';
+    var kb=Math.round(xlsxBuild(sheets,name)/1024);
+    T('⬇ '+rows.length+' measurement line'+(rows.length===1?'':'s')+' exported ('+kb+' KB). The same file imports straight back.');
+  }catch(e){
+    /* no Excel writer here — a CSV carries the same columns */
+    var q=function(v){ v=String(v==null?'':v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
+    var body=[PG_COLS.map(q).join(',')].concat(rows.map(function(r){ return r.map(q).join(','); })).join('\n');
+    try{ download('Progress-'+iso(new Date())+'.csv','﻿'+body,'text/csv'); }
+    catch(e2){
+      var a=document.createElement('a');
+      a.href=URL.createObjectURL(new Blob(['﻿'+body],{type:'text/csv'}));
+      a.download='Progress-'+iso(new Date())+'.csv'; a.click();
+    }
+    T('⬇ Exported as CSV — '+rows.length+' line'+(rows.length===1?'':'s')+'.');
+  }
+}
+/* an empty sheet with the right headings, for someone starting from scratch */
+function pgFormat(){
+  var eg=[];
+  try{
+    var b=(S.boq||[])[0];
+    if(b)eg.push([iso(new Date()), b.id||'', b.name||'', b.group||'', b.sub||'', b.floor||'', b.unit||'', 1,'','','', 0]);
+  }catch(e){}
+  try{
+    xlsxBuild([xlsxSheet({ raw:true, name:'Progress', head:PG_COLS,
+      align:['d','b','l','l','l','l','c','n','n','n','n','n'], rows:eg })],'Progress-format.xlsx');
+    T('⬇ Format downloaded — fill it in Excel and use ⬆ Import. Quantity may be left blank when No × L × B × H is given.');
+  }catch(e){ T('The Excel writer is not available here.'); }
+}
+
+/* ==================================================================
+   BOQ — the whole priced bill out to Excel, exactly as it reads on
+   screen, and in a shape that goes straight back in through
+   "Replace All BOQ" / "Paste from Excel".
+   ================================================================== */
+var BQ_COLS=['S.No','WBS Group / BOQ Name','Sub Parent / Segment','Item Description','Floor / Section',
+             'Unit','Qty','Rate','BOQ Value','Done (cum.)','Balance','Done %','Value of work done'];
+
+function bqPicked(){
+  var all=[]; try{ all=(S.boq||[]).slice(); }catch(e){}
+  var sel=null;
+  try{ if(typeof setupBoqGroups!=='undefined'&&setupBoqGroups&&setupBoqGroups.size)sel=setupBoqGroups; }catch(e){}
+  if(!sel)return {rows:all,filtered:false};
+  return {rows:all.filter(function(b){ return sel.has(String(b.group||'').trim()); }),filtered:true};
+}
+function bqDone(id){ try{ return N(cumQty(id,'9999-12-31',false)); }catch(e){ return 0; } }
+
+function bqExport(){
+  var pick=bqPicked(), items=pick.rows;
+  if(!items.length){ T('No BOQ in this project yet.'); return; }
+  var rows=[], tQ=0,tV=0,tD=0;
+  items.forEach(function(b,i){
+    var q=N(b.qty), r=(b.rate===''||b.rate==null)?'':N(b.rate);
+    var val=q*N(b.rate), done=bqDone(b.id), bal=q-done;
+    var pc=q?Math.round(done/q*1000)/10:'';
+    var dv=N(b.rate)*done;
+    tQ+=q; tV+=val; tD+=dv;
+    rows.push([i+1, b.group||'', b.sub||'', b.name||'', b.floor||'', b.unit||'',
+               q, r, val||'', done, Math.round(bal*10000)/10000, pc, dv||'']);
+  });
+  /* one line per WBS group, so the bill reads at a glance too */
+  var g={}, order=[];
+  items.forEach(function(b){
+    var k=String(b.group||'—').trim()||'—';
+    if(!g[k]){ g[k]={n:0,val:0,done:0}; order.push(k); }
+    g[k].n++; g[k].val+=N(b.qty)*N(b.rate); g[k].done+=bqDone(b.id)*N(b.rate);
+  });
+  var gRows=order.map(function(k){
+    var x=g[k];
+    return [k, x.n, x.val, x.done, x.val-x.done, x.val?Math.round(x.done/x.val*1000)/10:''];
+  });
+  gRows.push(['TOTAL', items.length, tV, tD, tV-tD, tV?Math.round(tD/tV*1000)/10:'']);
+
+  var proj='project'; try{ proj=(PROJ&&PROJ.name)||'project'; }catch(e){}
+  try{
+    var sheets=[
+      xlsxSheet({ raw:true, name:'BOQ', head:BQ_COLS,
+        align:['i','l','l','l','l','c','n','m','m','n','n','p','m'], rows:rows }),
+      xlsxSheet({ raw:true, name:'Summary', head:['WBS Group / BOQ Name','Items','BOQ Value','Value of work done','Value remaining','Done %'],
+        align:['l','i','m','m','m','p'], rows:gRows })
+    ];
+    var name='BOQ-'+String(proj).replace(/[^A-Za-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,28)+'-'+iso(new Date())+'.xlsx';
+    var kb=Math.round(xlsxBuild(sheets,name)/1024);
+    T('⬇ '+items.length+' BOQ item'+(items.length===1?'':'s')+(pick.filtered?' (the names you have ticked)':'')+
+      ' exported ('+kb+' KB). The same file goes back in through ⬆ Replace All BOQ.');
+  }catch(e){
+    var q2=function(v){ v=String(v==null?'':v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
+    var body=[BQ_COLS.map(q2).join(',')].concat(rows.map(function(r){ return r.map(q2).join(','); })).join('\n');
+    try{ download('BOQ-'+iso(new Date())+'.csv','﻿'+body,'text/csv'); }
+    catch(e2){
+      var a=document.createElement('a');
+      a.href=URL.createObjectURL(new Blob(['﻿'+body],{type:'text/csv'}));
+      a.download='BOQ-'+iso(new Date())+'.csv'; a.click();
+    }
+    T('⬇ BOQ exported as CSV — '+items.length+' item'+(items.length===1?'':'s')+'.');
+  }
+}
+
+function bqWire(){
+  var head=document.querySelector('#boqTable');
+  if(!head)return;
+  var card=head.closest('.card'); if(!card)return;
+  var ch=card.querySelector('.card-h'); if(!ch)return;
+  if(E('boqExportBtn'))return;
+  var b=document.createElement('button');
+  b.id='boqExportBtn'; b.className='ghost'; b.innerHTML='⬇ Export BOQ';
+  b.title='The whole priced bill in one Excel sheet — with BOQ value, work done and the balance';
+  var before=E('boqFileBtn');
+  if(before)ch.insertBefore(b,before); else ch.appendChild(b);
+  b.onclick=function(){ bqExport(); };
+}
+
+/* ---------------- the master password guards the import ---------------- */
+var PG_MASTER='1770719213';
+async function pgPass(){
+  var p=null;
+  try{ p=await pinDialog('\u{1F510} Enter the MASTER password to import the progress record:',false); }
+  catch(e){ return false; }
+  if(p===null)return false;
+  var h='';
+  try{ h=hashPin(String(p).trim()); }catch(e){ return false; }
+  var have='';
+  try{ var d=(typeof mrLoad==='function')?mrLoad():null; have=(d&&d.pass)||''; }catch(e){}
+  if(h===PG_MASTER||(have&&h===have))return true;
+  T('❌ Wrong master password — the import stays locked.');
+  return false;
+}
+
+/* ---------------- reading the file ---------------- */
+function pgHeadMap(row){
+  var m={}, look=function(t){ return String(t==null?'':t).toLowerCase().replace(/[^a-z0-9]/g,''); };
+  (row||[]).forEach(function(c,i){
+    var t=look(c); if(!t)return;
+    if(m.date==null    && /^date$/.test(t))m.date=i;
+    else if(m.id==null && /^(boqid|itemid|id|code)$/.test(t))m.id=i;
+    else if(m.name==null && /(itemdescription|description|item|workitem|boqitem)/.test(t))m.name=i;
+    else if(m.group==null && /^group/.test(t))m.group=i;
+    else if(m.sub==null && /^(sub|subhead|subsection)/.test(t))m.sub=i;
+    else if(m.floor==null && /(floor|level|segment)/.test(t))m.floor=i;
+    else if(m.unit==null && /^unit/.test(t))m.unit=i;
+    else if(m.no==null && /^(no|nos|number|count)$/.test(t))m.no=i;
+    else if(m.len==null && /^(length|len|l)$/.test(t))m.len=i;
+    else if(m.br==null && /^(breadth|width|br|b)$/.test(t))m.br=i;
+    else if(m.ht==null && /^(height|depth|ht|h)$/.test(t))m.ht=i;
+    else if(m.qty==null && /^(quantity|qty|measuredqty|done)$/.test(t))m.qty=i;
+  });
+  return m;
+}
+function pgParse(aoa){
+  var hdr=-1, col=null;
+  for(var r=0;r<Math.min(aoa.length,40);r++){
+    var m=pgHeadMap(aoa[r]);
+    if(m.date!=null&&(m.id!=null||m.name!=null)){ hdr=r; col=m; break; }
+  }
+  if(hdr<0)return {rows:[],bad:[],err:'The sheet needs a header row with at least Date and BOQ ID (or Item Description).'};
+  var byId={}, byName={};
+  try{ (S.boq||[]).forEach(function(b){
+    byId[String(b.id)]=b;
+    var k=String(b.name||'').trim().toLowerCase(); if(k&&!byName[k])byName[k]=b;
+  }); }catch(e){}
+  var out=[], bad=[];
+  for(var i=hdr+1;i<aoa.length;i++){
+    var rw=aoa[i]||[];
+    var g=function(k){ return col[k]==null?'':S2(rw[col[k]]); };
+    var d=ISOd(col.date==null?'':rw[col.date]);
+    var id=g('id'), nm=g('name');
+    if(!d&&!id&&!nm)continue;
+    var b=(id&&byId[id])||(nm&&byName[nm.toLowerCase()])||null;
+    if(!d){ bad.push({row:i+1,why:'no date',what:nm||id}); continue; }
+    if(!b){ bad.push({row:i+1,why:'this item is not in the BOQ',what:nm||id}); continue; }
+    var no=g('no'), len=g('len'), br=g('br'), ht=g('ht');
+    var qty=col.qty==null?'':S2(rw[col.qty]);
+    var q=N(qty);
+    if(!qty){                                   /* worked out the way the sheet does it */
+      var a=N(no)||1, l=N(len), w=N(br), h=N(ht);
+      q=a*(l||1)*(w||1)*(h||1);
+      if(!l&&!w&&!h)q=N(no);
+    }
+    if(!q){ bad.push({row:i+1,why:'quantity is zero',what:b.name}); continue; }
+    out.push({d:d, row:{group:S2(g('group'))||String(b.group||''), sub:S2(g('sub'))||String(b.sub||''),
+      boqId:b.id, floor:S2(g('floor'))||String(b.floor||''),
+      no:no, len:len, br:br, ht:ht, qty:Math.round(q*10000)/10000}});
+  }
+  return {rows:out,bad:bad,err:''};
+}
+
+/* ---------------- what the file will do, before it does it ---------------- */
+function pgPreview(parsed,fname,replace){
+  var ov=E('pgImpOv'); if(ov)ov.remove();
+  ov=document.createElement('div'); ov.id='pgImpOv';
+  ov.style.cssText='position:fixed;inset:0;z-index:2147483300;background:rgba(10,25,45,.55);display:flex;'+
+    'align-items:center;justify-content:center;padding:20px';
+  var days={}; parsed.rows.forEach(function(x){ days[x.d]=(days[x.d]||0)+1; });
+  var dayList=Object.keys(days).sort();
+  var nowN=0; try{ dayList.forEach(function(d){ nowN+=((S.days[d]&&S.days[d].progress)||[]).length; }); }catch(e){}
+  var rows=parsed.rows.slice(0,40).map(function(x,i){
+    var b=(S.boq||[]).filter(function(y){ return y.id===x.row.boqId; })[0]||{};
+    return '<tr><td style="text-align:center;color:#6d8199">'+(i+1)+'</td><td>'+X(fmtShort?fmtShort(x.d):x.d)+'</td>'+
+      '<td>'+X(b.name||'')+'</td><td>'+X(x.row.floor||'')+'</td>'+
+      '<td style="text-align:right">'+X(x.row.no||'')+'</td><td style="text-align:right">'+X(x.row.len||'')+'</td>'+
+      '<td style="text-align:right">'+X(x.row.br||'')+'</td><td style="text-align:right">'+X(x.row.ht||'')+'</td>'+
+      '<td style="text-align:right;font-weight:700">'+X(fmt?fmt(x.row.qty):x.row.qty)+'</td></tr>';
+  }).join('');
+  ov.innerHTML='<div style="background:#fff;border-radius:15px;max-width:1040px;width:100%;max-height:88vh;display:flex;'+
+      'flex-direction:column;overflow:hidden;font-family:inherit;box-shadow:0 24px 60px rgba(10,25,45,.35)">'+
+    '<div style="padding:15px 18px;border-bottom:1px solid #e3eaf2">'+
+      '<div style="font-weight:800;color:#12283f;font-size:.98rem">⬆ Import progress — '+X(fname)+'</div>'+
+      '<div style="font-size:.78rem;color:#6d8199;margin-top:3px"><b>'+parsed.rows.length+'</b> measurement line'+
+        (parsed.rows.length===1?'':'s')+' on <b>'+dayList.length+'</b> day'+(dayList.length===1?'':'s')+
+        (dayList.length?(' · '+X(dayList[0])+' to '+X(dayList[dayList.length-1])):'')+
+        (parsed.bad.length?(' · <span style="color:#b02a2a;font-weight:700">'+parsed.bad.length+' line'+
+          (parsed.bad.length===1?'':'s')+' skipped</span>'):'')+'</div>'+
+    '</div>'+
+    '<div style="overflow:auto;padding:0 18px">'+
+      (parsed.bad.length?('<div style="background:#fdf3e2;border:1px solid #e6c98a;border-radius:9px;padding:8px 11px;'+
+        'margin:12px 0 0;font-size:.76rem;color:#8a6d1a;max-height:110px;overflow:auto">'+
+        parsed.bad.slice(0,12).map(function(b){ return 'Row '+b.row+': '+X(b.what||'')+' — '+X(b.why); }).join('<br>')+
+        (parsed.bad.length>12?('<br>…and '+(parsed.bad.length-12)+' more'):'')+'</div>'):'')+
+      '<table style="width:100%;border-collapse:collapse;font-size:.79rem;margin:12px 0">'+
+        '<thead><tr>'+['#','Date','Item','Floor','No','L','B','H','Qty'].map(function(h){
+          return '<th style="background:#12283f;color:#fff;padding:6px 9px;text-align:left;font-size:.68rem;'+
+            'text-transform:uppercase;letter-spacing:.04em;position:sticky;top:0">'+h+'</th>'; }).join('')+
+        '</tr></thead><tbody>'+rows+'</tbody></table>'+
+      (parsed.rows.length>40?('<div style="font-size:.76rem;color:#6d8199;padding-bottom:10px">…and '+(parsed.rows.length-40)+' more.</div>'):'')+
+    '</div>'+
+    '<div style="padding:13px 18px;border-top:1px solid #e3eaf2;background:#f7fafd;display:flex;gap:9px;flex-wrap:wrap;align-items:center">'+
+      '<button id="pgAdd" style="background:#12283f;border:none;border-radius:9px;padding:9px 16px;font-size:.82rem;'+
+        'font-weight:700;color:#fff;cursor:pointer;font-family:inherit">➕ Add to the record</button>'+
+      '<button id="pgRep" style="background:#fff;border:1px solid #e3bcb7;border-radius:9px;padding:9px 16px;font-size:.82rem;'+
+        'font-weight:700;color:#b02a2a;cursor:pointer;font-family:inherit">♻ Replace these days</button>'+
+      '<span style="font-size:.74rem;color:#6d8199;margin-left:auto">'+
+        (nowN?('these days already hold '+nowN+' line'+(nowN===1?'':'s')):'nothing on these days yet')+'</span>'+
+      '<button id="pgX" style="background:#eef3f8;border:1px solid #dde5ee;border-radius:9px;padding:9px 15px;font-size:.82rem;'+
+        'font-weight:700;color:#27486a;cursor:pointer;font-family:inherit">Cancel</button>'+
+    '</div></div>';
+  document.body.appendChild(ov);
+  var css=E('pgImpCss');
+  if(!css){ css=document.createElement('style'); css.id='pgImpCss';
+    css.textContent='#pgImpOv td{border:1px solid #dbe5ef;padding:5px 9px;color:#1f3247;white-space:nowrap}'+
+      '#pgImpOv tbody tr:nth-child(even) td{background:#f7fafd}';
+    document.head.appendChild(css); }
+  var close=function(){ ov.remove(); };
+  ov.querySelector('#pgX').onclick=close;
+  ov.addEventListener('mousedown',function(e){ if(e.target===ov)close(); });
+  ov.querySelector('#pgAdd').onclick=function(){ pgApply(parsed,false); close(); };
+  ov.querySelector('#pgRep').onclick=function(){
+    Promise.resolve((typeof uiConfirm==='function')
+      ? uiConfirm('Replace the measurement on '+dayList.length+' day'+(dayList.length===1?'':'s')+'?\n\n'+
+          'What is on those days now ('+nowN+' line'+(nowN===1?'':'s')+') is kept aside so it can be put back from Setup → Replaced sheets.','Replace')
+      : window.confirm('Replace?')).then(function(ok){ if(ok){ pgApply(parsed,true); close(); } });
+  };
+}
+
+function pgApply(parsed,replace){
+  var days={}; parsed.rows.forEach(function(x){ days[x.d]=1; });
+  var dayList=Object.keys(days);
+  if(replace){
+    /* the old rows are kept aside first, so nothing is truly lost */
+    var snap={};
+    dayList.forEach(function(d){ snap[d]=((S.days[d]&&S.days[d].progress)||[]).slice(); });
+    try{ if(typeof rplSnap==='function')rplSnap('prog',snap,'progress replaced by a sheet ('+dayList.length+' day(s))'); }catch(e){}
+    dayList.forEach(function(d){ day(d).progress=[]; });
+  }
+  var n=0;
+  parsed.rows.forEach(function(x){
+    day(x.d).progress.push(Object.assign({},x.row));
+    n++;
+  });
+  save(true);
+  try{ renderProg&&renderProg(); }catch(e){}
+  try{ refreshAux&&refreshAux(); }catch(e){}
+  try{ if(window.cloudPushDays)window.cloudPushDays(dayList).then(function(k){
+    if(k)T('☁ '+k+' day(s) sent to the database.'); }); }catch(e){}
+  T('✅ '+n+' line'+(n===1?'':'s')+(replace?' imported — those days were replaced.':' added to the record.'));
+}
+
+function pgImportFile(file){
+  if(!file)return;
+  T('Reading '+file.name+'…');
+  var fr=new FileReader();
+  fr.onerror=function(){ T('That file could not be read.'); };
+  fr.onload=function(){
+    var done=function(aoa){
+      var parsed=pgParse(aoa||[]);
+      if(parsed.err){ T('⚠ '+parsed.err); return; }
+      if(!parsed.rows.length){
+        T('Nothing could be read from that sheet'+(parsed.bad.length?(' — '+parsed.bad.length+' line(s) did not match the BOQ.'):'.'));
+        return;
+      }
+      pgPreview(parsed,file.name);
+    };
+    if(/\.csv$|\.txt$/i.test(file.name)){
+      try{ done(parseDelimited(String(fr.result))); }catch(e){ T('That file could not be read.'); }
+      return;
+    }
+    loadXLSX().then(function(){
+      try{
+        var wb=XLSX.read(new Uint8Array(fr.result),{type:'array',cellDates:true});
+        var best=null,bestN=-1;
+        wb.SheetNames.forEach(function(nm){
+          var a=XLSX.utils.sheet_to_json(wb.Sheets[nm],{header:1,defval:'',raw:true});
+          var got=pgParse(a).rows.length;
+          if(got>bestN){ bestN=got; best=a; }
+        });
+        done(best||[]);
+      }catch(e){ T('That file could not be read as Excel.'); }
+    }).catch(function(){ T('The Excel reader could not be loaded — check the internet connection.'); });
+  };
+  if(/\.csv$|\.txt$/i.test(file.name))fr.readAsText(file); else fr.readAsArrayBuffer(file);
+}
+
+/* ---------------- the buttons ---------------- */
+function pgWire(){
+  var head=document.querySelector('#tab-entry .card-h');
+  if(!head)return;
+  var anchor=E('saveProg');
+  if(!anchor)return;
+  var admin=false; try{ admin=(typeof isAdmin==='function')?isAdmin():true; }catch(e){}
+  /* already there — only the Admin-only pair may need showing or hiding */
+  if(E('progExport')){
+    ['progImport','progFormat'].forEach(function(id){
+      var b=E(id); if(b)b.style.display=admin?'':'none';
+    });
+    return;
+  }
+
+  var mk=function(id,txt,title,cls,style){
+    var b=document.createElement('button');
+    b.id=id; b.className=cls||'ghost'; b.innerHTML=txt; b.title=title||'';
+    b.style.cssText=style||'padding:5px 12px;font-size:.78rem';
+    return b;
+  };
+  var ex=mk('progExport','⬇ Export','Every day’s measurement in one Excel sheet');
+  var im=mk('progImport','⬆ Import','Load a measurement sheet — master password needed',
+            'primary','padding:5px 12px;font-size:.78rem;background:#1d4670');
+  var fm=mk('progFormat','\u{1F4C4} Format','An empty sheet with the right headings');
+  var f=document.createElement('input');
+  f.type='file'; f.id='progImpFile'; f.accept='.xlsx,.xls,.xlsm,.csv,.txt'; f.style.display='none';
+
+  head.insertBefore(ex,anchor);
+  head.insertBefore(im,anchor); head.insertBefore(fm,anchor);
+  if(!admin){ im.style.display='none'; fm.style.display='none'; }
+  head.appendChild(f);
+
+  ex.onclick=function(){ pgExport(); };
+  fm.onclick=function(){ pgFormat(); };
+  im.onclick=async function(){
+    try{ if(typeof roBlock==='function'&&roBlock())return; }catch(e){}
+    if(!(await pgPass()))return;
+    f.click();
+  };
+  f.addEventListener('change',function(e){
+    var file=e.target.files&&e.target.files[0];
+    e.target.value='';
+    pgImportFile(file);
+  });
+}
+function ioWire(){ try{ pgWire(); }catch(e){} try{ bqWire(); }catch(e){} }
+document.addEventListener('DOMContentLoaded',ioWire);
+setTimeout(ioWire,1500);
+setInterval(ioWire,3000);
+window.pgExportProgress=pgExport;
+window.bqExportBoq=bqExport;
+})();
+
+</script>
+<script id="lokGateMod">
+/* ==================================================================
+   PROGRESS & CONCRETE — under lock
+   The Daily Progress Sheet and the Concrete (Ready Mix) record are the
+   two sheets every other figure in the application is worked out from.
+   So: the controls that change them are on the screen for an Admin
+   only, and every one of them asks for the MASTER password first —
+   every time, nothing is remembered between clicks.
+   ================================================================== */
+(function(){
+'use strict';
+
+function E(id){ return document.getElementById(id); }
+function T(m){ try{ toast(m); }catch(e){} }
+
+/* the master password — only its fingerprint is written here */
+var LK_MASTER='1770719213';
+function lkMasterHash(){
+  /* what an Admin has set in Master Setup wins over the factory one */
+  try{ var d=(typeof mrLoad==='function')?mrLoad():null; var h=(d&&d.pass)||''; if(h)return h; }catch(e){}
+  return LK_MASTER;
+}
+function lkAdmin(){
+  try{ if(typeof isAdmin==='function')return !!isAdmin(); }catch(e){}
+  try{ if(typeof window.__gloIsAdmin==='function')return !!window.__gloIsAdmin(); }catch(e){}
+  return false;
+}
+
+/* asked afresh on every single action — nothing is cached */
+async function lkAsk(what){
+  try{ if(typeof roBlock==='function'&&roBlock())return false; }catch(e){}
+  if(!lkAdmin()){ T('🔒 This is open to Admins only.'); return false; }
+  var p=null;
+  try{ p=await pinDialog('🔐 MASTER password — '+what+':',false); }
+  catch(e){ return false; }
+  if(p===null)return false;
+  var h=''; try{ h=hashPin(String(p).trim()); }catch(e){ return false; }
+  if(h===LK_MASTER||h===lkMasterHash())return true;
+  T('❌ Wrong master password — nothing was changed.');
+  return false;
+}
+
+/* ---- what is guarded, and what the prompt says ----
+   del:1  the button's own handler asks for the delete password as well,
+          so that second question is waved through for a few seconds.   */
+var LK_BTNS=[
+  {id:'addProg',     what:'to open a new Progress entry'},
+  {id:'editProg',    what:'to edit the saved Progress of this day'},
+  {id:'delProg',     what:'to delete all Progress of this day', del:1},
+  {id:'saveProg',    what:'to save the Progress sheet'},
+  {id:'addConc',     what:'to add a Concrete pour'},
+  {id:'editConc',    what:'to edit the saved Concrete of this day'},
+  {id:'delConc',     what:'to delete all Concrete of this day', del:1},
+  {id:'saveConc',    what:'to save the Concrete record'},
+  {id:'concEditBtn', what:'to unlock the saved Concrete entries'},
+  {id:'slipDel',     what:'to remove this slip', del:1}
+];
+var LK_BY_ID={}; LK_BTNS.forEach(function(x){ LK_BY_ID[x.id]=x; });
+/* these ask for the master password on their own already */
+var LK_SKIP={progImport:1,concImport:1};
+
+function lkGuard(spec){
+  var b=E(spec.id);
+  if(!b||b.__lkWrapped)return;
+  var orig=b.onclick;
+  if(typeof orig!=='function')return;        /* the app has not wired it yet */
+  b.__lkWrapped=1;
+  /* A 🗑 button is caught by the application's own delete gate before this
+     handler ever runs, which would mean two password boxes for one press.
+     Standing the gate down for the moment of the click keeps it to one —
+     the master password below — and it is put straight back afterwards. */
+  if(spec.del){
+    var stand=function(){ window.__DELPASS_UNTIL=Date.now()+4000; };
+    b.addEventListener('pointerdown',stand,true);
+    b.addEventListener('mousedown',stand,true);
+    b.addEventListener('touchstart',stand,true);
+  }
+  b.onclick=function(ev){
+    var self=this, args=arguments;
+    if(spec.del)window.__DELPASS_UNTIL=0;          /* nothing waved through yet */
+    lkAsk(spec.what).then(function(ok){
+      if(!ok){ if(spec.del)window.__DELPASS_UNTIL=0; return; }
+      /* the handler's own delete question was just answered — don't ask twice */
+      if(spec.del)window.__DELPASS_UNTIL=Date.now()+25000;
+      try{ orig.apply(self,args); }catch(e){ console.warn('lok',e); }
+      if(spec.del)setTimeout(function(){ window.__DELPASS_UNTIL=0; },25000);
+    });
+    return false;
+  };
+  if(!/🔐/.test(b.title||''))
+    b.title=(b.title?b.title+' — ':'')+'🔐 master password needed';
+}
+
+/* Admin only on the screen. A class is not used, so this stays independent
+   of whatever the login layer does with .admin-only. */
+function lkVisibility(){
+  var admin=lkAdmin();
+  LK_BTNS.forEach(function(x){
+    var b=E(x.id); if(!b)return;
+    if(b.dataset.lkDisp==null)b.dataset.lkDisp=b.style.display||'';
+    b.style.display=admin?b.dataset.lkDisp:'none';
+  });
+  /* the two Excel imports look after their own visibility already */
+  /* the paper-clip that attaches a slip lives inside the concrete rows */
+  try{
+    document.querySelectorAll('#tab-conc .slipbtn,#tab-conc [data-slip]').forEach(function(b){
+      b.style.display=admin?'':'none';
+    });
+  }catch(e){}
+  /* one line so a site engineer knows why the buttons are not there */
+  ['tab-entry','tab-conc'].forEach(function(pane){
+    var p=E(pane); if(!p)return;
+    var note=p.querySelector('.lk-adm-note');
+    if(admin){ if(note)note.remove(); return; }
+    if(note)return;
+    var h=p.querySelector('.card-h'); if(!h)return;
+    var s=document.createElement('span');
+    s.className='lk-adm-note noprint';
+    s.style.cssText='font-size:.72rem;color:#8a6d1a;background:#fdf3e2;border:1px solid #e6c98a;'+
+      'border-radius:7px;padding:3px 10px;font-weight:700;margin-left:8px';
+    s.textContent='🔒 View only — changing this sheet is Admin only';
+    h.appendChild(s);
+  });
+}
+
+function lkSweep(){
+  LK_BTNS.forEach(lkGuard);
+  lkVisibility();
+}
+document.addEventListener('DOMContentLoaded',lkSweep);
+setTimeout(lkSweep,1200);
+setTimeout(lkSweep,2600);
+setInterval(lkSweep,3000);
+window.__lkAsk=lkAsk;
+})();
+
+</script>
+<script id="finMod">
+/* ==================================================================
+   FINANCE — Daily In / Out and the Vendor Ledger
+   One company-wide register, beside COS Data on the front screen.
+   Every line is a bill received from a contractor / vendor, or a
+   payment made to one. The Ledger is worked out from those lines —
+   nothing is typed twice.
+   ================================================================== */
+(function(){
+'use strict';
+
+var K=function(){ return window.__cosKit||null; };
+function E(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function T(m){ try{ toast(m); }catch(e){} }
+function nowMs(){ return Date.now(); }
+function uid(){ return 'f'+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
+function num(v){ var n=parseFloat(String(v==null?'':v).replace(/[, ]/g,'')); return isFinite(n)?n:0; }
+function money(v){ return (Math.round(num(v))||0).toLocaleString('en-US'); }
+function isoDay(d){ d=d||new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function today(){ return isoDay(new Date()); }
+var MONS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function dShort(s){ if(!s)return '—'; var p=String(s).split('-'); if(p.length<3)return s; return (+p[2])+' '+MONS[(+p[1])-1]+' '+p[0].slice(2); }
+function dLong(s){ if(!s)return '—'; var p=String(s).split('-'); if(p.length<3)return s;
+  var d=new Date(+p[0],+p[1]-1,+p[2]); return d.toLocaleDateString('en-GB',{weekday:'short',day:'2-digit',month:'short',year:'numeric'}); }
+function ISOd(v){
+  if(v==null||v==='')return '';
+  if(v instanceof Date&&!isNaN(v))return isoDay(v);
+  var s=String(v).trim();
+  if(/^\d{4}-\d{2}-\d{2}/.test(s))return s.slice(0,10);
+  if(/^\d{5}$/.test(s)){ var d=new Date(Date.UTC(1899,11,30)+(+s)*86400000); if(!isNaN(d))return d.toISOString().slice(0,10); }
+  var MON={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,sept:9,oct:10,nov:11,dec:12};
+  var m=s.match(/^(\d{1,2})[-\/\s]([A-Za-z]{3,4})[-\/\s](\d{2,4})$/);
+  if(m){ var mo=MON[m[2].toLowerCase()]||MON[m[2].toLowerCase().slice(0,3)];
+    if(mo){ var y=+m[3]<100?2000+ +m[3]:+m[3]; return y+'-'+String(mo).padStart(2,'0')+'-'+String(+m[1]).padStart(2,'0'); } }
+  m=s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{2,4})$/);
+  if(m){ var a1=+m[1], b1=+m[2]; if(a1<=12&&b1>12){ m=[m[0],m[2],m[1],m[3]]; } }   /* 9/25/26 can only be m/d/y */
+  if(m){ var y2=+m[3]<100?2000+ +m[3]:+m[3]; return y2+'-'+String(+m[2]).padStart(2,'0')+'-'+String(+m[1]).padStart(2,'0'); }
+  var d2=new Date(s); return isNaN(d2)?'':isoDay(d2);
+}
+
+/* ================= the store ================= */
+var FIN_LS='fin_data_v1', FIN_DB='fin_data_db';
+var FIN=null, FIN_TAB='io', FIN_SAVE_T=null;
+var FIN_STATUS=['Received','Paid'];
+function finBlank(){ return {rows:[],lists:{vendors:[]},seq:{row:0},lock:{},access:{},gone:{},skip:{},wiped:0,_u:0}; }
+function finNorm(o){
+  o=o||{};
+  var out=finBlank();
+  out.rows=Array.isArray(o.rows)?o.rows.filter(function(r){ return r&&r.id; }):[];
+  /* S.No is fixed per line: the number given when it was added, never the position in a filtered view */
+  var mx=0; out.rows.forEach(function(r){ if(num(r._c)>mx)mx=num(r._c); });
+  out.rows.forEach(function(r){ if(!num(r._c)){ mx++; r._c=mx; } });
+  out.seq=Object.assign({row:0},o.seq||{}); if(num(out.seq.row)<mx)out.seq.row=mx;
+  out.lists=Object.assign(out.lists,o.lists||{});
+  if(!Array.isArray(out.lists.vendors))out.lists.vendors=[];
+  out.lock=(o.lock&&typeof o.lock==='object')?o.lock:{};
+  out.access=(o.access&&typeof o.access==='object')?o.access:{};
+  out.gone=(o.gone&&typeof o.gone==='object')?o.gone:{};
+  out.skip=(o.skip&&typeof o.skip==='object')?o.skip:{};
+  out.wiped=num(o.wiped);
+  out.renum=num(o.renum);
+  out.repair=num(o.repair);
+  out._u=num(o._u);
+  return out;
+}
+function finLoadLocal(){ var raw=null; try{ raw=localStorage.getItem(FIN_LS); }catch(e){} if(!raw)return null; try{ return finNorm(JSON.parse(raw)); }catch(e){ return null; } }
+function finWeight(o){ return o?(o.rows||[]).length:-1; }
+function finSaveLocal(){
+  if(!FIN)return; FIN._u=nowMs();
+  var s=JSON.stringify(FIN);
+  try{ localStorage.setItem(FIN_LS,s); }catch(e){}
+  try{ if(typeof idbPutKey==='function')idbPutKey(FIN_DB,'state',s); }catch(e){}
+}
+function finLoadDb(cb){
+  try{ if(typeof idbGetKey!=='function'){ cb(null); return; }
+    idbGetKey(FIN_DB,'state',function(s){ if(!s){ cb(null); return; } try{ cb(finNorm(JSON.parse(s))); }catch(e){ cb(null); } });
+  }catch(e){ cb(null); }
+}
+function finCloudOn(){ try{ return typeof cloudOn==='function'&&cloudOn()&&typeof supaPush==='function'; }catch(e){ return false; } }
+function finRows(){
+  var out=[];
+  (FIN.rows||[]).forEach(function(r){ out.push({item_id:'row:'+r.id,data:r}); });
+  out.push({item_id:'lists',data:{lists:FIN.lists,seq:FIN.seq,lock:FIN.lock,access:FIN.access||{},gone:FIN.gone||{},skip:FIN.skip||{},wiped:FIN.wiped||0,renum:FIN.renum||0,repair:FIN.repair||0,_u:FIN._u}});
+  return out;
+}
+async function finPush(){
+  if(!FIN||!finCloudOn())return {ok:false,reason:'offline'};
+  try{ var rows=finRows(); for(var i=0;i<rows.length;i+=40)await supaPush('fin',rows.slice(i,i+40)); return {ok:true,n:rows.length}; }
+  catch(e){ return {ok:false,reason:String(e&&e.message||e)}; }
+}
+async function finPull(){
+  if(!finCloudOn())return {ok:false,reason:'offline'};
+  try{
+    var got=await supaPull('fin'); if(!got||!got.length)return {ok:true,n:0};
+    var by={}; (FIN.rows||[]).forEach(function(r){ by[r.id]=r; });
+    var add=[], n=0;
+    got.forEach(function(row){
+      var id=String(row.item_id||''), d=row.data; if(!d)return;
+      if(id==='lists'){
+        if(d.lists&&(!FIN._u||num(d._u)>num(FIN._u))){ FIN.lists=Object.assign(FIN.lists,d.lists); FIN.seq=Object.assign(FIN.seq,d.seq||{}); }
+        if(d.lock)FIN.lock=Object.assign(FIN.lock||{},d.lock);
+        /* lines removed anywhere stay removed everywhere */
+        if(d.gone){ FIN.gone=Object.assign(FIN.gone||{},d.gone); }
+        /* a copy repaired here ignores the skip-list of an older, unrepaired copy */
+        if(d.skip&&num(d.repair||0)>=num(FIN.repair||0)){ FIN.skip=Object.assign(FIN.skip||{},d.skip); }
+        if(num(d.wiped)>num(FIN.wiped))FIN.wiped=num(d.wiped);
+        if(num(d.renum)>num(FIN.renum))FIN.renum=num(d.renum);
+        if(num(d.repair)>num(FIN.repair))FIN.repair=num(d.repair);
+        /* rights: the newer word for each user wins */
+        if(d.access){ FIN.access=FIN.access||{}; Object.keys(d.access).forEach(function(k){
+          var a=d.access[k], b=FIN.access[k];
+          if(!b||num((a||{}).t)>=num((b||{}).t))FIN.access[k]=a; }); }
+        return;
+      }
+      if(id.indexOf('row:')!==0)return;
+      var key=id.slice(4), cur=by[key];
+      if(d._del){ if(cur){ cur._del=1; n++; } return; }
+      if(!cur){ add.push(d); by[key]=d; n++; }
+      else if(num(d._u)>num(cur._u)){ Object.keys(d).forEach(function(k){ cur[k]=d[k]; }); n++; }
+    });
+    if(add.length)FIN.rows=FIN.rows.concat(add);
+    var gone=FIN.gone||{};
+    FIN.rows=FIN.rows.filter(function(r){ return !r._del&&!gone[r.id]; });
+    if(n)finSaveLocal();
+    return {ok:true,n:n};
+  }catch(e){ return {ok:false,reason:String(e&&e.message||e)}; }
+}
+function finSave(quiet){
+  finSaveLocal();
+  clearTimeout(FIN_SAVE_T);
+  FIN_SAVE_T=setTimeout(function(){
+    finPush().then(function(r){
+      var chip=document.getElementById('finCloud');
+      if(chip){
+        chip.textContent=r.ok?'☁ Saved to the database':'⚠ On this computer only';
+        chip.style.background=r.ok?'rgba(22,163,74,.9)':'rgba(220,38,38,.85)';
+        setTimeout(function(){ try{ chip.textContent='☁ Database'; chip.style.background='rgba(255,255,255,.14)'; }catch(e){} },2600);
+      }
+      if(!quiet&&!r.ok&&r.reason!=='offline')T('⚠ Finance was kept here, but the database refused it.');
+    });
+  },700);
+}
+function finReady(cb){
+  if(FIN){ cb(); return; }
+  var local=finLoadLocal();
+  finLoadDb(function(fromDb){
+    var pick=local; if(fromDb&&finWeight(fromDb)>finWeight(local))pick=fromDb;
+    FIN=finNorm(pick||finBlank()); finSaveLocal(); cb();
+    finPull().then(function(r){ if(r.ok&&r.n){ try{ finPaint(); }catch(e){} } });
+  });
+}
+try{ if(typeof SHARED_TYPES!=='undefined')SHARED_TYPES.fin=1; }catch(e){}
+try{ if(typeof CLOUD_LABELS!=='undefined')CLOUD_LABELS.fin='Finance (Daily In / Out · Ledger)'; }catch(e){}
+
+/* ================= who ================= */
+/* ---- who may open Finance, and with what rights ----
+   Admins (Master Settings) have everything. Anybody else gets what an Admin
+   gives them in Finance → Settings: view, or view + edit. That word travels
+   with the register, so it holds on every laptop.                          */
+var FINU=null;
+function finGlo(){ try{ if(typeof window.__gloUser==='function')return window.__gloUser(); }catch(e){} return null; }
+function finIsAdminNow(){
+  try{ if(typeof window.__gloIsAdmin==='function'&&window.__gloIsAdmin())return true; }catch(e){}
+  try{ if(typeof currentUser!=='undefined'&&currentUser&&currentUser.role==='admin')return true; }catch(e){}
+  return false;
+}
+function finRightOf(u,store){
+  if(!u)return '';
+  /* Master Settings ▸ Add / Edit user ▸ Finance */
+  try{ var t=u.access&&u.access.__tiles; if(t&&(t.fin==='view'||t.fin==='edit'))return t.fin; }catch(e){}
+  var acc=(store||FIN||{}).access||{};
+  if(!acc||typeof acc!=='object')return '';
+  var hit=u.dbId!=null?acc[String(u.dbId)]:null;
+  if(!hit&&u.name){ var nm=String(u.name).trim().toLowerCase();
+    Object.keys(acc).forEach(function(k){ var a=acc[k]; if(a&&a.name&&String(a.name).trim().toLowerCase()===nm)hit=a; }); }
+  var r=hit?String(hit.r||''):'';
+  return (r==='view'||r==='edit')?r:'';
+}
+function finResolveUser(){
+  var g=finGlo();
+  if(g){
+    if(g.role==='admin')return {id:String(g.dbId||'admin'),name:g.name||'Admin',role:'admin'};
+    var r=finRightOf(g); if(r)return {id:String(g.dbId||''),name:g.name||'',role:r};
+    return null;
+  }
+  try{ if(typeof currentUser!=='undefined'&&currentUser){
+    if(currentUser.role==='admin')return {id:String(currentUser.id||'admin'),name:currentUser.name||'Admin',role:'admin'};
+    var r2=finRightOf({dbId:currentUser.id,name:currentUser.name}); if(r2)return {id:String(currentUser.id||''),name:currentUser.name||'',role:r2};
+  } }catch(e){}
+  return null;
+}
+function finUser(){ return FINU; }
+function finIsAdmin(){ return !!(FINU&&FINU.role==='admin'); }
+function finCanEdit(){ return !!(FINU&&(FINU.role==='admin'||FINU.role==='edit')); }
+/* may this person open Finance at all? (also read before the register is loaded, from the local copy) */
+function finAllowed(u){
+  u=u||finGlo();
+  if(u){ if(u.role==='admin')return true; }
+  else if(finIsAdminNow())return true;
+  var store=FIN; if(!store){ try{ store=JSON.parse(localStorage.getItem(FIN_LS)||'null'); }catch(e){ store=null; } }
+  return !!(u&&finRightOf(u,store));
+}
+window.__finAccessOk=function(u){ try{ return finAllowed(u); }catch(e){ return false; } };
+function finWho(){ var u=finUser(); return u?(u.name||u.user||''):''; }
+function finRoleTxt(r){ return r==='admin'?'Admin':(r==='edit'?'View + Edit':'View only'); }
+
+/* ================= the Progress Bills, read straight into the sheet =================
+   Every bill of V-Grand and Elevation (Contractor / Vendor Bill → Progress Bills) becomes
+   a Received line, and every payment recorded on a bill a Paid line. They carry a src
+   key, so running again adds only what is new and refreshes what changed — a line
+   somebody has edited by hand (_e) is left alone, and a line somebody removed (skip)
+   does not come back.                                                              */
+var FIN_PB_PROJS=null;                     /* null = every project */
+function finDropRows(list,noSkip){
+  FIN.gone=FIN.gone||{}; FIN.skip=FIN.skip||{};
+  list.forEach(function(r){ r._del=1; r._u=nowMs(); FIN.gone[r.id]=nowMs(); if(r.src&&!noSkip)FIN.skip[r.src]=1; });
+  finPush().then(function(){});                       /* the deletion itself travels */
+  var ids={}; list.forEach(function(r){ ids[r.id]=1; });
+  FIN.rows=FIN.rows.filter(function(x){ return !ids[x.id]; });
+  FIN._u=nowMs(); finSave();
+}
+/* once, as asked on 25 Sep 2026: the lines typed by hand before the sheet was fed
+   from the bills are cleared, so the register starts from the bills alone */
+var FIN_WIPE_STAMP=1;
+function finWipeOnce(){
+  if(num(FIN.wiped)>=FIN_WIPE_STAMP)return;
+  var manual=(FIN.rows||[]).filter(function(r){ return !r.src; });
+  FIN.wiped=FIN_WIPE_STAMP;
+  if(manual.length)finDropRows(manual); else { FIN._u=nowMs(); finSave(true); }
+}
+/* once: the numbers follow the dates (the first fill numbered project by project) */
+/* once: the earlier build could drop bill lines when another project's bills were not loaded,
+   and then remembered them as 'skipped' — those marks are cleared so the bills return */
+function finRepairOnce(){
+  if(num(FIN.repair)>=1)return;
+  var sk=FIN.skip||{}, n=0;
+  Object.keys(sk).forEach(function(k){ if(k.indexOf('pb:')===0||k.indexOf('pay:')===0){ delete sk[k]; n++; } });
+  FIN.repair=1; FIN._u=nowMs(); finSave(true);
+}
+function finRenumberOnce(){
+  if(num(FIN.renum)>=1)return;
+  var rows=(FIN.rows||[]).slice().sort(function(a,b){ return String(a.date||'').localeCompare(String(b.date||''))||num(a._c)-num(b._c); });
+  rows.forEach(function(r,i){ if(num(r._c)!==i+1){ r._c=i+1; r._u=nowMs(); } });
+  FIN.seq.row=rows.length; FIN.renum=1; FIN._u=nowMs(); finSave(true);
+}
+function finSyncBills(){
+  var out={added:0,updated:0};
+  if(!FIN)return out;
+  var bySrc={}; (FIN.rows||[]).forEach(function(r){ if(r.src)bySrc[r.src]=r; });
+  var skip=FIN.skip||{}, seen={}, seenProj={};
+  var upsert=function(key,rec){
+    seen[key]=1;
+    if(skip[key])return;
+    var cur=bySrc[key];
+    if(cur){
+      if(cur._e)return;                                   /* edited by hand — theirs now */
+      var ch=false; Object.keys(rec).forEach(function(k){ if(String(cur[k]==null?'':cur[k])!==String(rec[k]==null?'':rec[k])){ cur[k]=rec[k]; ch=true; } });
+      if(ch){ cur._u=nowMs(); out.updated++; }
+      return;
+    }
+    FIN.seq.row=num(FIN.seq.row)+1;
+    var r=Object.assign({id:uid(),note:'',src:key,_c:FIN.seq.row,_u:nowMs()},rec);
+    FIN.rows.push(r); bySrc[key]=r; out.added++;
+  };
+  try{
+    (typeof allProjects==='function'?allProjects():[]).filter(function(p){ return !FIN_PB_PROJS||FIN_PB_PROJS.indexOf(p.id)>=0; }).forEach(function(pr){
+      var st=null;
+      try{ st=(typeof PROJ!=='undefined'&&PROJ&&pr.id===PROJ.id&&typeof S!=='undefined')?S:mrProjectState(pr); }catch(e){}
+      if(!st||!Array.isArray(st.progressBills))return;
+      if(st.progressBills.length)seenProj[pr.id]=1;      /* an empty list may just mean 'not loaded here' — never a reason to drop lines */
+      var wos=Array.isArray(st.workOrders)?st.workOrders:[];
+      var ordN={};                                     /* how many bills of this type came before on the same work order */
+      var ordinal=function(n){ var sfx=['th','st','nd','rd'], v=n%100; return n+(sfx[(v-20)%10]||sfx[v]||sfx[0]); };
+      st.progressBills.forEach(function(b){
+        if(!b||!b.id)return;
+        var ok=b.type+'|'+b.woId; ordN[ok]=(ordN[ok]||0)+1;
+        var kind=ordinal(ordN[ok])+(b.type==='pb'?' progress bill':' advance');
+        var w=wos.filter(function(x){ return x.id===b.woId; })[0]||{};
+        var vendor=String(b.vendor||w.vendor||'').trim(); if(!vendor)return;
+        var net=0; try{ net=payNetOf(b); }catch(e){ net=num(b.type==='pb'?b.net:b.thisReq); }
+        var base={vendor:vendor, project:pr.name, wo:String(b.serial||w.serial||'').trim(), req:String(b.no||'').trim(), ipc:kind, kind:'', diary:''};
+        if(net)upsert('pb:'+pr.id+':'+b.id, Object.assign({date:ISOd(b.date)||today(), voucher:'', amount:Math.round(net*100)/100, status:'Received', by:'Progress Bills'},base));
+        var pays=[]; try{ pays=payList(b); }catch(e){ pays=Array.isArray(b.payments)?b.payments:[]; }
+        pays.forEach(function(p,i){
+          var amt=num(p&&p.amount); if(!amt)return;
+          var d=p&&p.at?isoDay(new Date(num(p.at))):(ISOd(p&&p.date)||ISOd(b.date)||today());
+          upsert('pay:'+pr.id+':'+b.id+':'+i, Object.assign({date:d, voucher:String((p&&p.voucherNo)||'').trim(), amount:Math.round(amt*100)/100, status:'Paid', by:(p&&p.by)?String(p.by):'Progress Bills'},base));
+        });
+      });
+    });
+  }catch(e){ console.warn('finSyncBills',e); }
+  /* a bill deleted on the main sheets leaves the register too (unless somebody edited its line) */
+  var gone=(FIN.rows||[]).filter(function(r){ if(!r.src||seen[r.src]||r._e)return false; var p=r.src.split(':'); return (p[0]==='pb'||p[0]==='pay')&&seenProj[p[1]]; });
+  if(gone.length){ finDropRows(gone,true); out.removed=gone.length; }
+  if(out.added||out.updated){ FIN._u=nowMs(); finSave(true); }
+  return out;
+}
+
+/* ================= locks (a day, once posted, is closed) ================= */
+function finLocked(d){ return !!(FIN.lock&&FIN.lock[d]&&FIN.lock[d].at); }
+function finLockInfo(d){ return (FIN.lock&&FIN.lock[d])||null; }
+function finLockDay(d){ FIN.lock[d]={by:finWho(),at:nowMs()}; FIN._u=nowMs(); finSave(); finPaint(); T('🔒 '+dShort(d)+' saved & locked.'); }
+function finLockDays(list){
+  var n=0; list.forEach(function(d){ if(d&&!finLocked(d)){ FIN.lock[d]={by:finWho(),at:nowMs()}; n++; } });
+  FIN._u=nowMs(); finSave(); finPaint(); T('🔒 '+n+' day'+(n===1?'':'s')+' saved & locked.');
+}
+function finUnlockDays(list){
+  var k=K(); if(!k)return;
+  k.pass('🔓 Unlock '+list.length+' day'+(list.length===1?'':'s'),'The admin password is needed to change days that are already posted.').then(function(v){
+    if(v==null)return; list.forEach(function(d){ delete FIN.lock[d]; }); FIN._u=nowMs(); finSave(); finPaint(); T('🔓 '+list.length+' day'+(list.length===1?'':'s')+' unlocked — lock them again when done.');
+  });
+}
+function finUnlockDay(d){
+  var k=K(); if(!k){ return; }
+  k.pass('🔓 Unlock '+dShort(d),'The admin password is needed to change a day that is already posted.').then(function(v){
+    if(v==null)return; delete FIN.lock[d]; FIN._u=nowMs(); finSave(); finPaint(); T('🔓 '+dShort(d)+' unlocked — lock it again when done.');
+  });
+}
+
+/* ================= helpers ================= */
+/* The contractors / vendors the MAIN sheets already know — Work Orders / Contracts
+   and Progress Bills of every project. Nothing is typed in here; only those are offered. */
+var FIN_VEN_CACHE={at:0,list:[]};
+function finMainVendors(){
+  if(nowMs()-FIN_VEN_CACHE.at<45000)return FIN_VEN_CACHE.list;
+  var set={};
+  var add=function(v){ v=String(v==null?'':v).trim(); if(v)set[v.toLowerCase()]=set[v.toLowerCase()]||v; };
+  try{
+    (typeof allProjects==='function'?allProjects():[]).forEach(function(pr){
+      var st=null;
+      try{ st=(typeof PROJ!=='undefined'&&PROJ&&pr.id===PROJ.id&&typeof S!=='undefined')?S:mrProjectState(pr); }catch(e){}
+      if(!st)return;
+      (Array.isArray(st.workOrders)?st.workOrders:[]).forEach(function(w){ add(w.vendor); });
+      (Array.isArray(st.progressBills)?st.progressBills:[]).forEach(function(b){ add(b.vendor); });
+      (Array.isArray(st.vendors)?st.vendors:[]).forEach(add);           /* the concrete suppliers too */
+    });
+  }catch(e){}
+  var list=Object.keys(set).map(function(k){ return set[k]; }).sort(function(a,b){ return a.localeCompare(b); });
+  FIN_VEN_CACHE={at:nowMs(),list:list};
+  return list;
+}
+/* the Work Orders / Contracts of every project, as the main sheets hold them */
+var FIN_WO_CACHE={at:0,list:[]};
+function finMainWOs(){
+  if(nowMs()-FIN_WO_CACHE.at<45000)return FIN_WO_CACHE.list;
+  var out=[];
+  try{
+    (typeof allProjects==='function'?allProjects():[]).forEach(function(pr){
+      var st=null;
+      try{ st=(typeof PROJ!=='undefined'&&PROJ&&pr.id===PROJ.id&&typeof S!=='undefined')?S:mrProjectState(pr); }catch(e){}
+      if(!st)return;
+      (Array.isArray(st.workOrders)?st.workOrders:[]).forEach(function(w){
+        var val=0; try{ val=cvdVal(w); }catch(e){ val=num(w.totalValue); }
+        out.push({proj:pr.name, projId:pr.id, serial:String(w.serial||'').trim(), vendor:String(w.vendor||'').trim(),
+          sub:String(w.subSeg||'').trim(), title:String(w.title||'').trim(), detail:String(w.detail||'').trim(),
+          value:val, agree:w.agree||'', est:w.est||''});
+      });
+    });
+  }catch(e){}
+  out.sort(function(a,b){ return a.vendor.localeCompare(b.vendor)||a.serial.localeCompare(b.serial,undefined,{numeric:true}); });
+  FIN_WO_CACHE={at:nowMs(),list:out};
+  return out;
+}
+/* the Progress Bills every site has SUBMITTED (Contractor / Vendor Bill), vendor by vendor */
+var FIN_PB_CACHE={at:0,map:{}};
+function finMainBills(){
+  if(nowMs()-FIN_PB_CACHE.at<45000)return FIN_PB_CACHE.map;
+  var m={};
+  try{
+    (typeof allProjects==='function'?allProjects():[]).forEach(function(pr){
+      var st=null;
+      try{ st=(typeof PROJ!=='undefined'&&PROJ&&pr.id===PROJ.id&&typeof S!=='undefined')?S:mrProjectState(pr); }catch(e){}
+      if(!st)return;
+      var wos=Array.isArray(st.workOrders)?st.workOrders:[];
+      (Array.isArray(st.progressBills)?st.progressBills:[]).forEach(function(b){
+        var w=wos.filter(function(x){ return x.id===b.woId; })[0]||{};
+        var v=String(b.vendor||w.vendor||'').trim().toLowerCase(); if(!v)return;
+        /* only what the site has actually submitted — a draft is not a bill yet */
+        var w2=b.wf||{}; if(!(w2.submitted||w2.vLead||w2.approved||w2.received))return;
+        var net=0; try{ net=payNetOf(b); }catch(e){ net=num(b.net||b.thisReq); }
+        if(!m[v])m[v]={n:0,net:0,list:[]};
+        m[v].n++; m[v].net+=net;
+        var paid=0; try{ paid=payTotal(b); }catch(e){}
+        var st='draft'; try{ st=wfStatus(b); }catch(e){}
+        m[v].list.push({proj:pr.name, wo:String(w.serial||b.serial||'').trim(), title:String(w.title||b.subSeg||w.subSeg||'').trim(),
+          no:String(b.no||'').trim(), date:b.date||'', type:(b.type==='pb'?'Progress bill':'Advance'), net:net, paid:paid, status:st});
+      });
+    });
+  }catch(e){}
+  FIN_PB_CACHE={at:nowMs(),map:m};
+  return m;
+}
+function finWOsOf(vendor){
+  var v=String(vendor||'').trim().toLowerCase();
+  return finMainWOs().filter(function(w){ return !v||w.vendor.toLowerCase()===v; });
+}
+function finWOLabel(w){ return w.serial+' \u2014 '+(w.title||w.sub||'')+(w.proj?(' \u00B7 '+w.proj):''); }
+/* for the filters: the main list plus whatever the lines already carry */
+function finVendors(){
+  var out=[], seen={};
+  var add=function(v){ v=String(v==null?'':v).trim(); if(!v)return; var k=v.toLowerCase(); if(seen[k])return; seen[k]=1; out.push(v); };
+  finMainVendors().forEach(add);
+  (FIN.rows||[]).forEach(function(r){ add(r.vendor); });
+  return out.sort(function(a,b){ return a.localeCompare(b); });
+}
+function finProjects(){
+  var out=[], seen={};
+  var add=function(v){ v=String(v==null?'':v).trim(); if(!v)return; var k=v.toLowerCase(); if(seen[k])return; seen[k]=1; out.push(v); };
+  try{ (typeof allProjects==='function'?allProjects():[]).forEach(function(p){ add(p.name); }); }catch(e){}
+  try{ var c=JSON.parse(localStorage.getItem('cos_data_v1')||'null'); ((c&&c.lists&&c.lists.projects)||[]).forEach(add); }catch(e){}   /* the ones written in COS Settings */
+  (FIN.rows||[]).forEach(function(r){ add(r.project); });
+  return out;
+}
+function selOpts(list,cur,blank){ var k=K(); return k?k.selOpts(list,cur,blank):''; }
+function pill(t){ var k=K(); return k?k.pill(t):E(t); }
+function dlist(id,list){ return '<datalist id="'+id+'">'+list.map(function(v){ return '<option value="'+E(v)+'">'; }).join('')+'</datalist>'; }
+function sumBy(rows){
+  var rec=0,paid=0;
+  rows.forEach(function(r){ if(r.status==='Paid')paid+=num(r.amount); else rec+=num(r.amount); });
+  return {rec:rec,paid:paid,bal:rec-paid};
+}
+function rowSort(a,b){ return String(a.date).localeCompare(String(b.date))||num(a._c)-num(b._c); }
+
+/* ================= the shell ================= */
+function finCss(){
+  if(document.getElementById('finCss'))return;
+  var k=K(); var base=k?k.css():'';
+  var s=document.createElement('style'); s.id='finCss';
+  s.textContent=base.replace(/#cosOv/g,'#finOv')+'\n'+[
+    '#finOv .cos-logo{display:inline-flex;align-items:center;background:#fff;border-radius:10px;padding:4px 10px;height:40px}',
+    '#finOv .cos-logo img{height:30px;width:auto;display:block}',
+    '#finOv .rep-pick{display:flex;gap:6px;flex-wrap:wrap}',
+    '#finOv .rep-pick button{background:#eef3f8;border:1px solid #dde5ee;border-radius:9px;padding:7px 13px;font-size:.76rem;font-weight:700;color:#41586f;cursor:pointer}',
+    '#finOv .rep-pick button.on{background:#12283f;border-color:#12283f;color:#fff}',
+    '#finOv table.fin-t td{padding:4px 5px;vertical-align:middle}',
+    '#finOv table.fin-t input,#finOv table.fin-t select{padding:5px 7px;font-size:.76rem;border-radius:7px;min-width:0}',
+    '#finOv table.fin-t input.amt{text-align:right;font-weight:700;font-variant-numeric:tabular-nums}',
+    '#finOv table.fin-t input:disabled,#finOv table.fin-t select:disabled{background:#f5f7fa;color:#41586f;border-color:#e6ecf2}',
+    '#finOv .lockbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#fdf3e2;border:1px solid #e6c98a;border-left:5px solid #c98a1b;border-radius:10px;padding:9px 13px;margin-bottom:12px;font-size:.78rem;color:#8a6d1a}',
+    '#finOv .rec{color:#1c7a42;font-weight:800}#finOv .pay{color:#b02a2a;font-weight:800}',
+    '#finOv .tot td{background:#f2f5f8;font-weight:800;border-top:2px solid #cfd9e4}',
+    '#finOv .exp td{background:#fbfdff;padding:0}',
+    '#finOv .exp table{font-size:.72rem}#finOv .exp th{background:#e8f1fb;color:#1d5a8f;position:static}'
+  ].join('\n');
+  document.head.appendChild(s);
+}
+function finLogoSrc(){
+  try{ var h=String(window.__VCC_LOGO__||''); var m=h.match(/src="([^"]+)"/); if(m)return m[1]; }catch(e){}
+  return '';
+}
+function finLogoHTML(){
+  var src=finLogoSrc();
+  return src?('<span class="cos-logo"><img alt="The Vertical" src="'+src+'"></span>'):'<span class="cos-mark">💵</span>';
+}
+function finOpen(){
+  if(!finAllowed()){ T('🔒 Finance is not open to this account — an Admin gives access in Finance → Settings.'); return; }
+  if(!K()){ T('Finance could not start — the COS module is missing.'); return; }
+  finCss();
+  finReady(function(){
+    var ov=document.getElementById('finOv'); if(ov)ov.remove();
+    ov=document.createElement('div'); ov.id='finOv';
+    ov.innerHTML=
+      '<div class="cos-top">'+
+        finLogoHTML()+
+        '<span><span class="cos-ttl">FINANCE</span><span class="cos-sub">THE VERTICAL · ALL PROJECTS</span></span>'+
+        '<span class="sp" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
+          '<span class="cos-chip" id="finCloud">☁ Database</span>'+
+          '<span class="cos-chip" id="finWho" style="display:none"></span>'+
+          '<button class="cos-btn" id="finSync" style="display:none">↻ Refresh</button>'+
+          '<button class="cos-btn" id="finOut" style="display:none">↩ Sign out</button>'+
+          '<button class="cos-btn x" id="finX">✕ Close</button>'+
+        '</span>'+
+      '</div>'+
+      '<div class="cos-tabs" id="finTabs" style="display:none"></div>'+
+      '<div class="cos-body" id="finBody"></div>';
+    document.body.appendChild(ov);
+    ov.querySelector('#finX').onclick=finClose;
+    ov.querySelector('#finOut').onclick=function(){ FINU=null; finPaint(); };
+    ov.querySelector('#finSync').onclick=function(){
+      var b=this; b.textContent='↻ Refreshing…';
+      Promise.all([finPush(),finPull()]).then(function(r){ b.textContent='↻ Refresh'; try{ finWipeOnce(); finRepairOnce(); finSyncBills(); }catch(e){} finPaint();
+        T(r[1]&&r[1].ok?('☁ Up to date'+(r[1].n?(' — '+r[1].n+' line'+(r[1].n===1?'':'s')+' came in'):'')):'⚠ The database did not answer.'); });
+    };
+    /* the person is already signed in to the application — that sign-in serves here, with the rights an Admin gave */
+    FINU=finResolveUser();
+    if(!FINU){ try{ var raw=sessionStorage.getItem(K().sessKey); if(raw){ var u=JSON.parse(raw); var real=K().findUser(u.id);
+      if(real||u.name)FINU={id:String((real||u).id),name:(real||u).name,role:'admin'}; } }catch(e){} }
+    try{ finWipeOnce(); finRepairOnce(); finSyncBills(); finRenumberOnce(); }catch(e){ console.warn('fin sync',e); }
+    finPaint();
+  });
+}
+function finClose(){ var ov=document.getElementById('finOv'); if(ov)ov.remove(); }
+window.openFinance=finOpen;
+
+var FIN_TABS=[['io','💵 DAILY IN / OUT'],['led','📒 LEDGER'],['ven','🏢 VENDORS'],['rep','🖨 REPORTS'],['set','⚙️ SETTINGS']];
+function finPaint(){
+  var ov=document.getElementById('finOv'); if(!ov)return;
+  var body=ov.querySelector('#finBody'), tabs=ov.querySelector('#finTabs'), who=ov.querySelector('#finWho');
+  var u=finUser();
+  ['finOut','finSync'].forEach(function(id){ var b=ov.querySelector('#'+id); if(b)b.style.display=u?'':'none'; });
+  if(!u){ tabs.style.display='none'; who.style.display='none'; body.innerHTML=finLoginHTML(); finLoginWire(); return; }
+  who.style.display=''; who.textContent='👤 '+(u.name||u.user)+' · '+finRoleTxt(u.role);
+  tabs.style.display='';
+  var vis=FIN_TABS.filter(function(t){ return t[0]!=='set'||finIsAdmin(); });
+  if(FIN_TAB==='set'&&!finIsAdmin())FIN_TAB='io';
+  tabs.innerHTML=vis.map(function(t){ return '<button class="cos-tab'+(FIN_TAB===t[0]?' on':'')+'" data-ft="'+t[0]+'">'+t[1]+'</button>'; }).join('');
+  tabs.querySelectorAll('[data-ft]').forEach(function(b){ b.onclick=function(){ FIN_TAB=b.dataset.ft; finPaint(); try{ ov.scrollTop=0; }catch(e){} }; });
+  if(FIN_TAB==='led')finLedTab(body); else if(FIN_TAB==='ven')finVenTab(body); else if(FIN_TAB==='rep')finRepTab(body); else if(FIN_TAB==='set')finSetTab(body); else finIoTab(body);
+}
+
+/* ---- sign in: the Admin users of Master Settings, same as COS Data ---- */
+function finLoginHTML(){
+  var list=K().admins(); var last=''; try{ last=localStorage.getItem('cos_last_user')||''; }catch(e){}
+  var opts=list.map(function(u){ return '<option value="'+E(u.id)+'"'+(u.id===last?' selected':'')+'>'+E(u.name+(u.desig?('  ·  '+u.desig):''))+'</option>'; }).join('');
+  if(!list.length)opts='<option value="cos_master">Administrator · Master password</option>';
+  return '<div class="cos-login"><h2>💵 Finance</h2>'+
+    '<p class="s">Daily In / Out of every contractor and vendor bill, and the ledger it adds up to.</p>'+
+    '<div class="field"><label class="fl">User</label><select id="finU">'+opts+'</select></div>'+
+    '<div class="field"><label class="fl">Password</label><input type="password" id="finP" autocomplete="current-password" placeholder="••••••"></div>'+
+    '<button class="p" id="finIn" style="width:100%;padding:10px;font-size:.85rem;margin-top:6px">Sign in</button>'+
+    '<div class="cos-err" id="finErr"></div>'+
+    '<div style="font-size:.71rem;color:#8798ab;margin-top:10px;line-height:1.5">These are the <b>Admin</b> users from ⚙ Master Settings — sign in with your own password. The Master Settings password works too. One sign-in serves COS Data and Finance both.</div></div>';
+}
+function finLoginWire(){
+  var ov=document.getElementById('finOv'), k=K();
+  var u=ov.querySelector('#finU'), p=ov.querySelector('#finP'), err=ov.querySelector('#finErr');
+  var go=function(){
+    var row=k.findUser(String(u.value||'')); if(!row){ err.textContent='Pick your name from the list.'; return; }
+    var pass=String(p.value||''); if(!pass){ err.textContent='Enter your password.'; p.focus(); return; }
+    var h=k.hp(pass), ok=!!(row.pass&&row.pass===h);
+    if(!ok){ try{ var mp=mrLoad().pass; if(mp&&mp===h)ok=true; }catch(e){} }
+    if(!ok){ err.textContent='Wrong password.'; p.select(); return; }
+    FINU={id:String(row.id),name:row.name,role:'admin'};
+    try{ localStorage.setItem('cos_last_user',row.id); }catch(e){}
+    finPaint();
+  };
+  ov.querySelector('#finIn').onclick=go;
+  [u,p].forEach(function(el){ el.addEventListener('keydown',function(e){ if(e.key==='Enter')go(); }); });
+  setTimeout(function(){ try{ p.focus(); }catch(e){} },80);
+}
+
+/* ================= DAILY IN / OUT ================= */
+var IO={d:'',all:true,from:'',to:'',q:'',vendor:'',proj:'',status:''};   /* opens on every date, so nothing seems to be missing */
+function ioDay(){ if(!IO.d)IO.d=today(); return IO.d; }
+function ioShift(n){ var p=ioDay().split('-'); var d=new Date(+p[0],+p[1]-1,+p[2]+n); IO.d=isoDay(d); finPaint(); }
+function ioDates(){ var m={}; (FIN.rows||[]).forEach(function(r){ if(r.date)m[r.date]=(m[r.date]||0)+1; }); return m; }
+function ioList(){
+  var q=IO.q.toLowerCase();
+  return (FIN.rows||[]).filter(function(r){
+    if(!IO.all){ if(r.date!==ioDay())return false; }
+    else{ if(IO.from&&String(r.date)<IO.from)return false; if(IO.to&&String(r.date)>IO.to)return false; }
+    if(IO.vendor&&String(r.vendor||'').trim().toLowerCase()!==IO.vendor.toLowerCase())return false;
+    if(IO.proj&&String(r.project||'').trim()!==IO.proj)return false;
+    if(IO.status&&r.status!==IO.status)return false;
+    if(q){ var hay=[r.vendor,r.project,r.diary,r.wo,r.voucher,r.req,r.ipc,r.amount,r.status,r.by,r.note].join(' ').toLowerCase(); if(hay.indexOf(q)<0)return false; }
+    return true;
+  }).sort(rowSort);
+}
+var IO_GHOSTS=14;                       /* blank lines kept below the last filled one — a full sheet */
+function ioRowHTML(r,i,ed,ghost){
+  var lkRow=!ghost&&IO.all&&finLocked(r.date);
+  var dd=(ed&&!lkRow)?'':' disabled';
+  return '<tr data-id="'+E(r.id)+'"'+(ghost?' data-ghost="1"':'')+'>'+
+    '<td style="text-align:center;color:#6d8199" class="sno"'+(r.src?' title="From Progress Bills — filled by itself"':'')+'>'+(ghost?'<span style="color:#b9c4d0">'+(i+1)+'</span>':num(r._c))+(r.src?'<div style="font-size:.6rem;line-height:1">🧾</div>':'')+'</td>'+
+    '<td style="width:120px"><input type="date" data-f="date" value="'+E(r.date||'')+'"'+dd+'></td>'+
+    '<td style="min-width:220px"><input type="text" class="fcb" data-f="vendor" value="'+E(r.vendor||'')+'" placeholder="type to search\u2026" autocomplete="off"'+dd+'></td>'+
+    '<td style="width:170px"><select data-f="project"'+dd+'>'+selOpts(finProjects(),r.project||'','\u2014 Project \u2014')+'</select></td>'+
+    '<td style="width:120px"><input type="text" data-f="diary" value="'+E(r.diary||'')+'" placeholder="Diary No"'+dd+'></td>'+
+    '<td style="width:130px"><input type="text" class="fcb" data-src="wo" data-f="wo" value="'+E(r.wo||'')+'" placeholder="WO #" autocomplete="off"'+dd+'></td>'+
+    '<td style="width:92px"><input type="text" data-f="voucher" value="'+E(r.voucher||'')+'" placeholder="Voucher #"'+dd+'></td>'+
+    '<td style="width:100px"><input type="text" data-f="req" value="'+E(r.req||'')+'" placeholder="Request No"'+dd+'></td>'+
+    '<td style="width:152px"><input type="text" data-f="ipc" value="'+E(r.ipc||'')+'" placeholder="IPC"'+dd+'></td>'+
+    '<td style="width:130px"><input type="text" class="amt" data-f="amount" value="'+E(r.amount===''||r.amount==null?'':money(r.amount))+'" placeholder="0"'+dd+'></td>'+
+    '<td style="width:112px"><select data-f="status"'+dd+'>'+selOpts(FIN_STATUS,r.status||'Received')+'</select></td>'+
+    '<td style="width:128px"><input type="text" data-f="by" value="'+E(r.by||'')+'" placeholder="Posted by"'+dd+'></td>'+
+    '<td style="width:34px;text-align:center" class="act">'+((ed&&!lkRow&&!ghost)?'<button class="d" data-del="'+E(r.id)+'" title="Remove this line">✕</button>':(lkRow?'🔒':''))+'</td>'+
+  '</tr>';
+}
+function ioGhost(d){ return {id:uid(),date:IO.all?'':d,vendor:'',project:'',diary:'',wo:'',voucher:'',req:'',ipc:'',amount:'',status:'Received',by:finWho()}; }
+/* the figures above the sheet, refreshed in place so typing is never interrupted */
+function ioTotals(body){
+  var list=ioList(), tot=sumBy(list);
+  var k=body.querySelectorAll('.kpi .b .n');
+  if(k.length>=4){ k[0].textContent='Rs '+money(tot.rec); k[1].textContent='Rs '+money(tot.paid); k[2].textContent='Rs '+money(tot.bal); k[3].textContent=String(list.length); }
+  var t=body.querySelector('tr.tot');
+  if(t){ t.querySelector('.t-rec').textContent='Rs '+money(tot.rec); t.querySelector('.t-pay').textContent='Rs '+money(tot.paid); t.querySelector('.t-bal').textContent=money(tot.bal); }
+}
+function finIoTab(body){
+  var d=ioDay(), dates=ioDates(), list=ioList(), tot=sumBy(list);
+  var lk=!IO.all&&finLocked(d), LI=finLockInfo(d), ed=finCanEdit()&&!lk;
+  var vendors=finVendors(), projs=finProjects();
+  var dayKeys=Object.keys(dates).sort().reverse();
+  var chips=dayKeys.slice(0,14).map(function(k){ return '<button class="g" data-god="'+k+'" style="padding:4px 9px'+(k===d&&!IO.all?';background:#1f6b48;color:#fff;border-color:#1f6b48':'')+'">'+E(dShort(k))+' <b style="opacity:.7">'+dates[k]+'</b>'+(finLocked(k)?' 🔒':'')+'</button>'; }).join(' ');
+
+  var trs=list.map(function(r,i){ return ioRowHTML(r,i,ed,false); }).join('');
+  var nextNo=num(FIN.seq.row);
+  /* the sheet always runs on below the last filled line */
+  if(ed){ var gh=Math.max(IO_GHOSTS-list.length,3); for(var g=0;g<gh;g++)trs+=ioRowHTML(ioGhost(d),nextNo+g,ed,true); }
+
+  body.innerHTML=
+    (lk?('<div class="lockbar"><span style="font-size:1.1rem">🔒</span><div style="flex:1"><b>'+E(dShort(d))+' is saved &amp; locked</b>'+
+      (LI&&LI.by?(' by '+E(LI.by)):'')+(LI&&LI.at?(' · '+E(dLong(isoDay(new Date(LI.at))))):'')+' — nothing on this day can be added or changed until it is unlocked.</div>'+
+      (finCanEdit()?'<button class="g" id="ioUnlock" style="border-color:#b7952a;color:#8a6d1a">🔓 Unlock</button>':'')+'</div>'):'')+
+    '<div class="cos-card"><div class="cos-ch"><h3>💵 Daily In / Out</h3>'+
+      '<span class="hint">every bill received and every payment made — one line each</span><span class="sp"></span>'+
+      '<button class="g" id="ioMode">'+(IO.all?'📅 One day':'📆 All dates')+'</button>'+
+      (finIsAdmin()?'<button class="g" id="ioSyncPb" title="Read every Progress Bill (and its payments) of V-Grand and Elevation into this sheet — nothing typed by hand is touched">⟳ From Progress Bills</button>':'')+
+      (finIsAdmin()?'<button class="g" id="ioImp" title="Read the Daily In Out sheet from Excel — master password">⬆ Import Excel</button>':'')+
+      '<button class="g" id="ioXl" title="Daily In Out + Ledger, as Excel">⬇ Excel</button>'+
+      '<button class="g" id="ioPrint">🖨 Print</button>'+
+      (finCanEdit()&&!IO.all?(lk?'':'<button class="g" id="ioLock" style="border-color:#1f6b48;color:#1f6b48;font-weight:800">🔒 Save &amp; Lock</button>'):'')+
+      (finCanEdit()&&IO.all?('<button class="g" id="ioLockAll" style="border-color:#1f6b48;color:#1f6b48;font-weight:800" title="Lock every day shown below">🔒 Save &amp; Lock all shown</button>'+
+        '<button class="g" id="ioUnlockAll" style="border-color:#b7952a;color:#8a6d1a" title="Unlock every locked day shown below — admin password">🔓 Unlock shown</button>'):'')+
+    '</div><div class="cos-cb">'+
+      '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">'+
+        (IO.all
+          ?('<div><label class="fl">From</label><input type="date" id="ioF" value="'+E(IO.from)+'"></div>'+
+            '<div><label class="fl">To</label><input type="date" id="ioT" value="'+E(IO.to)+'"></div>')
+          :('<div><label class="fl">Day</label><div style="display:flex;gap:5px"><button class="g" id="ioPrev" style="padding:6px 9px">‹</button>'+
+            '<input type="date" id="ioD" value="'+E(d)+'"><button class="g" id="ioNext" style="padding:6px 9px">›</button>'+
+            '<button class="g" id="ioToday" style="padding:6px 9px">Today</button></div></div>'))+
+        '<div><label class="fl">Search</label><input type="text" id="ioQ" value="'+E(IO.q)+'" placeholder="vendor, diary, voucher, IPC…"></div>'+
+        '<div><label class="fl">Vendor</label><select id="ioV">'+selOpts(vendors,IO.vendor,'All vendors')+'</select></div>'+
+        '<div><label class="fl">Project</label><select id="ioP">'+selOpts(projs,IO.proj,'All projects')+'</select></div>'+
+        '<div><label class="fl">Status</label><select id="ioS">'+selOpts(FIN_STATUS,IO.status,'Received + Paid')+'</select></div>'+
+      '</div>'+
+      (dayKeys.length&&!IO.all?('<div style="margin-top:10px;display:flex;gap:5px;flex-wrap:wrap;align-items:center"><span style="font-size:.68rem;font-weight:700;color:#6d8199;text-transform:uppercase;letter-spacing:.06em;margin-right:4px">Posted days</span>'+chips+(dayKeys.length>14?('<span style="font-size:.7rem;color:#6d8199">\u2026 '+(dayKeys.length-14)+' more</span>'):'')+'</div>'):'')+
+      (IO.all?('<div style="margin-top:10px;font-size:.74rem;color:#6d8199">'+dayKeys.length+' posted day'+(dayKeys.length===1?'':'s')+' \u00B7 '+(FIN.rows||[]).length+' line'+((FIN.rows||[]).length===1?'':'s')+' in all \u2014 the blank lines at the bottom take today\u2019s date unless you change it</div>'):'')+
+    '</div></div>'+
+    '<div class="kpi">'+
+      '<div class="b" style="border-left-color:#1c7a42"><div class="n rec">Rs '+money(tot.rec)+'</div><div class="l">Bills received'+(IO.all?'':' · '+E(dShort(d)))+'</div></div>'+
+      '<div class="b" style="border-left-color:#b02a2a"><div class="n pay">Rs '+money(tot.paid)+'</div><div class="l">Paid</div></div>'+
+      '<div class="b" style="border-left-color:#1d5a8f"><div class="n">Rs '+money(tot.bal)+'</div><div class="l">Received − Paid</div></div>'+
+      '<div class="b" style="border-left-color:#5b47a0"><div class="n">'+list.length+'</div><div class="l">Lines</div></div>'+
+    '</div>'+
+    '<div class="cos-card"><div class="cos-ch"><h3>'+(IO.all?'📆 All dates':'📅 '+E(dLong(d)))+'</h3>'+
+      '<span class="hint">'+(ed?'type straight into the sheet — every line saves by itself, and a fresh line is always waiting below · Enter moves down':'view only')+'</span>'+
+    '</div><div class="cos-cb" style="padding:0">'+
+      '<div class="cos-tw" style="border:none;border-radius:0"><table class="cos-t fin-t"><thead><tr>'+
+        '<th style="width:40px">S.No</th><th>Date</th><th>Contractor / Vendor Name</th><th>Project</th><th>Diary No</th><th>Work order #</th><th>Voucher #</th><th>Request No</th><th>IPC No</th>'+
+        '<th style="text-align:right">Amount</th><th>Status</th><th>Posted By</th><th></th></tr></thead><tbody id="ioBody">'+
+        (trs||'<tr><td colspan="13" class="empty">Nothing posted'+(IO.all?' in this range':' on '+E(dShort(d)))+'.'+
+          ((!IO.all&&(FIN.rows||[]).length)?(' <b>'+(FIN.rows||[]).length+'</b> line'+((FIN.rows||[]).length===1?'':'s')+' sit on other days \u2014 press \uD83D\uDCC6 All dates.'):'')+'</td></tr>')+
+      '</tbody><tfoot>'+
+        '<tr class="tot"><td colspan="9" style="text-align:right">TOTAL — received <span class="rec t-rec">Rs '+money(tot.rec)+'</span> · paid <span class="pay t-pay">Rs '+money(tot.paid)+'</span></td>'+
+          '<td style="text-align:right" class="t-bal">'+money(tot.bal)+'</td><td colspan="3" style="color:#6d8199;font-weight:600">received − paid</td></tr>'+
+      '</tfoot></table></div>'+
+    '</div></div>';
+
+  var q=function(s){ return body.querySelector(s); };
+  var on=function(sel,ev,fn){ var el=q(sel); if(el)el.addEventListener(ev,fn); };
+  on('#ioMode','click',function(){ IO.all=!IO.all; finPaint(); });
+  on('#ioPrev','click',function(){ ioShift(-1); });
+  on('#ioNext','click',function(){ ioShift(1); });
+  on('#ioToday','click',function(){ IO.d=today(); finPaint(); });
+  on('#ioD','change',function(){ if(this.value){ IO.d=this.value; finPaint(); } });
+  on('#ioF','change',function(){ IO.from=this.value; finPaint(); });
+  on('#ioT','change',function(){ IO.to=this.value; finPaint(); });
+  on('#ioQ','input',function(){ IO.q=this.value; clearTimeout(finIoTab._t); finIoTab._t=setTimeout(finPaint,260); });
+  on('#ioV','change',function(){ IO.vendor=this.value; finPaint(); });
+  on('#ioP','change',function(){ IO.proj=this.value; finPaint(); });
+  on('#ioS','change',function(){ IO.status=this.value; finPaint(); });
+  on('#ioLock','click',function(){
+    var now=ioList();
+    if(!now.length){ T('Nothing on this day to lock yet.'); return; }
+    Promise.resolve(typeof uiConfirm==='function'?uiConfirm('Save & lock '+dShort(d)+'?\n\n'+now.length+' line(s). After this the admin password is needed to change the day.','Lock'):window.confirm('Lock?'))
+      .then(function(ok){ if(ok)finLockDay(d); });
+  });
+  on('#ioUnlock','click',function(){ finUnlockDay(d); });
+  on('#ioLockAll','click',function(){
+    var days={}; ioList().forEach(function(r){ if(r.date&&!finLocked(r.date))days[r.date]=1; });
+    var ds=Object.keys(days).sort();
+    if(!ds.length){ T('Every day shown is locked already.'); return; }
+    Promise.resolve(typeof uiConfirm==='function'?uiConfirm('Save & lock '+ds.length+' day'+(ds.length===1?'':'s')+' — '+dShort(ds[0])+(ds.length>1?(' to '+dShort(ds[ds.length-1])):'')+'?\n\nAfter this the admin password is needed to change any of them.','Lock'):window.confirm('Lock?'))
+      .then(function(ok){ if(ok)finLockDays(ds); });
+  });
+  on('#ioUnlockAll','click',function(){
+    var days={}; ioList().forEach(function(r){ if(r.date&&finLocked(r.date))days[r.date]=1; });
+    var ds=Object.keys(days).sort();
+    if(!ds.length){ T('No locked day among those shown.'); return; }
+    finUnlockDays(ds);
+  });
+  on('#ioXl','click',function(){ finExcel(ioList(),IO.all?'':d); });
+  on('#ioPrint','click',function(){ var l=ioList(); finPrintIo(l,sumBy(l),d); });
+  on('#ioImp','click',function(){ finImportAsk(); });
+  on('#ioSyncPb','click',function(){ var r=finSyncBills(); finPaint(); T('⟳ Progress Bills: '+r.added+' new line'+(r.added===1?'':'s')+(r.updated?(', '+r.updated+' updated'):'')+'.'); });
+  body.querySelectorAll('[data-god]').forEach(function(b){ b.onclick=function(){ IO.d=b.dataset.god; IO.all=false; finPaint(); }; });
+
+  var tb=q('#ioBody');
+  var wireDel=function(b){ b.onclick=function(){
+    var r=FIN.rows.find(function(x){ return x.id===b.dataset.del; }); if(!r)return;
+    K().pass('🗑 Remove this line','Rs '+money(r.amount)+' · '+(r.vendor||'—')+' · '+dShort(r.date)+'. The admin password is needed.').then(function(v){
+      if(v==null)return; finDropRows([r]); finPaint(); T('Line removed.'); });
+  }; };
+  var FIELDS=['date','vendor','project','diary','wo','voucher','req','ipc','amount','status','by'];
+  var readRow=function(tr){ var o={}; FIELDS.forEach(function(f){ var el=tr.querySelector('[data-f="'+f+'"]'); o[f]=el?el.value:''; }); o.amount=num(o.amount); return o; };
+  var wireRow=function(tr){
+    tr.querySelectorAll('[data-f]').forEach(function(el){
+      var f=el.dataset.f;
+      var commit=function(){
+        var ghost=tr.dataset.ghost==='1';
+        var r=FIN.rows.find(function(x){ return x.id===tr.dataset.id; });
+        var v=el.value;
+        if(f==='amount'){ v=num(v); el.value=v?money(v):''; }
+        if(f==='vendor'){
+          v=String(v).trim();
+          if(v){
+            var hit=finCbMatch(v);
+            if(!hit){ el.value=(r&&r.vendor)||''; T('\u26A0 \u201C'+v+'\u201D is not on the Contractors / Vendors list \u2014 pick a name from the main sheets.'); return; }
+            v=hit; el.value=hit;
+          }
+        }
+        if(ghost){
+          /* a blank line becomes a real one the moment something is written on it */
+          var o=readRow(tr); o[f]=v;
+          var has=String(o.vendor).trim()||o.amount||String(o.diary).trim()||String(o.voucher).trim()||String(o.wo).trim()||String(o.ipc).trim()||String(o.req).trim();
+          if(!has)return;
+          if(!o.date){ o.date=IO.all?today():d; tr.querySelector('[data-f="date"]').value=o.date; }
+          if(!o.by){ o.by=finWho(); tr.querySelector('[data-f="by"]').value=o.by; }
+          FIN.seq.row=num(FIN.seq.row)+1;
+          r=Object.assign({id:tr.dataset.id,note:'',_c:FIN.seq.row,_u:nowMs()},o);
+          FIN.rows.push(r); delete tr.dataset.ghost;
+          try{ tr.querySelector('.sno').innerHTML=String(r._c); }catch(e){}
+          var act=tr.querySelector('.act'); act.innerHTML='<button class="d" data-del="'+E(r.id)+'" title="Remove this line">✕</button>'; wireDel(act.firstChild);
+          /* keep the sheet running on below */
+          var ghosts=tb.querySelectorAll('tr[data-ghost]').length, n=tb.querySelectorAll('tr[data-id]').length;
+          if(ghosts<3){ var w=document.createElement('tbody'); w.innerHTML=ioRowHTML(ioGhost(d),num(FIN.seq.row)+ghosts,true,true); var nt=w.firstChild; tb.appendChild(nt); wireRow(nt); }
+          finSave(true); ioTotals(body); return;
+        }
+        if(!r)return;
+        if(f==='date'&&!v)return;
+        if(r[f]===v)return;
+        r[f]=v; r._u=nowMs(); r._e=1; finSave(true);
+        if(f==='status'||f==='amount'||f==='date')ioTotals(body);
+      };
+      el.addEventListener('change',commit);
+      if(el.tagName==='INPUT'&&el.type==='text')el.addEventListener('blur',commit);
+      el.addEventListener('keydown',function(e){
+        if(e.key==='Enter'||e.key==='ArrowDown'||e.key==='ArrowUp'){
+          if(e.key!=='Enter'&&el.tagName==='SELECT')return;
+          e.preventDefault(); commit();
+          var nx=(e.key==='ArrowUp')?tr.previousElementSibling:tr.nextElementSibling;
+          if(nx&&nx.dataset&&nx.dataset.id){ var t=nx.querySelector('[data-f="'+f+'"]'); if(t){ t.focus(); if(t.select)try{ t.select(); }catch(x){} } }
+        }
+      });
+    });
+  };
+  finCbWire(tb);
+  tb.querySelectorAll('tr[data-id]').forEach(wireRow);
+  tb.querySelectorAll('[data-del]').forEach(wireDel);
+}
+
+/* ---- the vendor search box: type a few letters, pick from what matches ---- */
+function finCbMatch(v){
+  var list=finMainVendors(), q=String(v||'').trim().toLowerCase(); if(!q)return '';
+  var exact=list.filter(function(x){ return x.toLowerCase()===q; })[0]; if(exact)return exact;
+  var part=list.filter(function(x){ return x.toLowerCase().indexOf(q)>=0; });
+  return part.length===1?part[0]:'';
+}
+var CB={el:null,idx:-1,items:[]};
+function finCbPanel(){
+  var p=document.getElementById('finCbPanel');
+  if(!p){ p=document.createElement('div'); p.id='finCbPanel';
+    p.style.cssText='position:fixed;z-index:2147483400;background:#fff;border:1px solid #cfd9e4;border-radius:9px;box-shadow:0 12px 30px rgba(10,25,45,.18);max-height:260px;overflow:auto;min-width:240px;display:none;font-size:.78rem';
+    p.addEventListener('mousedown',function(e){ e.preventDefault(); });       /* keep the input focused */
+    p.addEventListener('click',function(e){ var it=e.target.closest('[data-cbv]'); if(it)finCbPick(it.dataset.cbv); });
+    document.body.appendChild(p); }
+  return p;
+}
+function finCbItems(el){
+  var q=String(el.value||'').trim().toLowerCase();
+  if(el.dataset.src==='wo'){
+    var tr=el.closest('tr'), ven=''; try{ ven=tr.querySelector('[data-f="vendor"]').value; }catch(e){}
+    var wos=finWOsOf(ven);
+    return {kind:'wo', all:wos.length, items:wos.filter(function(w){ return !q||(w.serial+' '+w.title+' '+w.sub+' '+w.proj).toLowerCase().indexOf(q)>=0; }).slice(0,60)
+      .map(function(w){ return {v:w.serial, t:'<b>'+E(w.serial)+'</b> \u2014 '+E(w.title||w.sub||'')+'<span style="color:#6d8199"> \u00B7 '+E(w.proj)+' \u00B7 Rs '+money(w.value)+'</span>'}; })};
+  }
+  var list=finMainVendors();
+  return {kind:'vendor', all:list.length, items:list.filter(function(x){ return !q||x.toLowerCase().indexOf(q)>=0; }).slice(0,60).map(function(x){ return {v:x,t:E(x)}; })};
+}
+function finCbShow(el){
+  var p=finCbPanel(), got=finCbItems(el), list=got.items;
+  CB.el=el; CB.items=list.map(function(x){ return x.v; }); CB.idx=list.length?0:-1;
+  if(!got.all){ p.innerHTML='<div style="padding:9px 12px;color:#8798ab">'+(got.kind==='wo'?'No work order on the main sheets for this vendor \u2014 the number can be typed in.':'No contractor / vendor on the main sheets yet \u2014 add Work Orders / Contracts first.')+'</div>'; }
+  else if(!list.length){ p.innerHTML='<div style="padding:9px 12px;color:#b02a2a;font-weight:700">No '+(got.kind==='wo'?'work order':'name')+' matches \u201C'+E(el.value)+'\u201D</div>'; }
+  else p.innerHTML=list.map(function(x,i){ return '<div data-cbv="'+E(x.v)+'" style="padding:7px 12px;cursor:pointer;white-space:nowrap'+(i===CB.idx?';background:#e8f1fb;color:#1d5a8f;font-weight:700':'')+'">'+x.t+'</div>'; }).join('');
+  var r=el.getBoundingClientRect();
+  p.style.left=Math.min(r.left,Math.max(10,window.innerWidth-520))+'px'; p.style.top=(r.bottom+3)+'px'; p.style.minWidth=Math.max(240,r.width)+'px'; p.style.maxWidth='520px'; p.style.display='';
+}
+function finCbHide(){ var p=document.getElementById('finCbPanel'); if(p)p.style.display='none'; CB.el=null; CB.items=[]; CB.idx=-1; }
+function finCbPick(v){ var el=CB.el; if(!el)return; el.value=v; finCbHide(); el.dispatchEvent(new Event('change',{bubbles:true})); }
+function finCbMove(n){
+  if(!CB.items.length)return; CB.idx=(CB.idx+n+CB.items.length)%CB.items.length;
+  var p=finCbPanel(); [].forEach.call(p.children,function(c,i){ var on=i===CB.idx; c.style.background=on?'#e8f1fb':''; c.style.color=on?'#1d5a8f':''; c.style.fontWeight=on?'700':''; if(on&&c.scrollIntoView)c.scrollIntoView({block:'nearest'}); });
+}
+function finCbWire(tb){
+  if(tb.__cb)return; tb.__cb=1;
+  tb.addEventListener('focusin',function(e){ var el=e.target; if(el.classList&&el.classList.contains('fcb')&&!el.disabled)finCbShow(el); });
+  tb.addEventListener('input',function(e){ var el=e.target; if(el.classList&&el.classList.contains('fcb'))finCbShow(el); });
+  tb.addEventListener('focusout',function(e){ var el=e.target; if(el.classList&&el.classList.contains('fcb'))setTimeout(function(){ if(CB.el===el)finCbHide(); },120); });
+  tb.addEventListener('keydown',function(e){
+    var el=e.target; if(!el.classList||!el.classList.contains('fcb')||CB.el!==el)return;
+    if(e.key==='ArrowDown'){ e.preventDefault(); e.stopPropagation(); finCbMove(1); }
+    else if(e.key==='ArrowUp'){ e.preventDefault(); e.stopPropagation(); finCbMove(-1); }
+    else if(e.key==='Enter'||e.key==='Tab'){ if(CB.idx>=0&&CB.items[CB.idx]){ if(e.key==='Enter'){ e.preventDefault(); e.stopPropagation(); } el.value=CB.items[CB.idx]; finCbHide(); el.dispatchEvent(new Event('change',{bubbles:true})); } }
+    else if(e.key==='Escape'){ finCbHide(); }
+  },true);
+}
+
+/* ---- everything behind one vendor: the work orders from the main sheets, and the
+   Finance lines project by project, each against its work order ---- */
+function finVendorDetail(x){
+  var wos=finWOsOf(x.name), rows=(x.rows||[]).slice().sort(rowSort);
+  var bySer={}; wos.forEach(function(w){ bySer[w.serial.toLowerCase()]=w; });
+  var agg={}; rows.forEach(function(r){ var k=String(r.wo||'').trim().toLowerCase(); if(!agg[k])agg[k]={rec:0,paid:0,n:0}; agg[k].n++; if(r.status==='Paid')agg[k].paid+=num(r.amount); else agg[k].rec+=num(r.amount); });
+  var cell=function(v,st){ return '<td style="'+(st||'')+'">'+v+'</td>'; };
+  var woT='<table class="cos-t" style="width:100%"><thead><tr><th style="width:90px">WO #</th><th>Project</th><th>Title of work order</th><th style="text-align:right;width:130px">Contract value</th><th style="text-align:right;width:120px">Bill received</th><th style="text-align:right;width:120px">Paid</th><th style="text-align:right;width:120px">Balance</th><th style="text-align:right;width:60px">Lines</th></tr></thead><tbody>'+
+    (wos.length?wos.map(function(w){ var a=agg[w.serial.toLowerCase()]||{rec:0,paid:0,n:0};
+      return '<tr>'+cell('<b>'+E(w.serial)+'</b>')+cell(E(w.proj)+(w.sub&&w.sub!==w.proj?('<div style="font-size:.7rem;color:#6d8199">'+E(w.sub)+'</div>'):''))+
+        cell(E(w.title||'\u2014')+(w.detail?('<div style="font-size:.7rem;color:#6d8199">'+E(w.detail.slice(0,120))+(w.detail.length>120?'\u2026':'')+'</div>'):''))+
+        cell(money(w.value),'text-align:right')+cell(money(a.rec),'text-align:right;color:#1c7a42;font-weight:700')+cell(money(a.paid),'text-align:right;color:#b02a2a;font-weight:700')+
+        cell(money(a.rec-a.paid),'text-align:right;font-weight:800')+cell(a.n,'text-align:right;color:#6d8199')+'</tr>'; }).join('')
+      :'<tr><td colspan="8" class="empty" style="padding:10px">No work order on the main sheets for this vendor.</td></tr>')+
+    '</tbody></table>';
+  /* lines not against any known work order */
+  var loose=Object.keys(agg).filter(function(k){ return !bySer[k]; });
+  var looseT=loose.length?('<div style="font-size:.72rem;font-weight:700;color:#8a6d1a;margin:8px 0 4px">Lines with no work order on the main sheets: '+
+    loose.map(function(k){ var a=agg[k]; return (k?('WO \u201C'+E(k)+'\u201D'):'no WO #')+' \u2014 '+a.n+' line'+(a.n===1?'':'s')+' (received '+money(a.rec)+' \u00B7 paid '+money(a.paid)+')'; }).join(' \u00B7 ')+'</div>'):'';
+  /* the lines themselves, project by project */
+  var byP={}, order=[];
+  rows.forEach(function(r){ var k=String(r.project||'').trim()||'\u2014'; if(!byP[k]){ byP[k]=[]; order.push(k); } byP[k].push(r); });
+  var lineT=order.map(function(pk){ var l=byP[pk], t=sumBy(l);
+    return '<div style="font-size:.74rem;font-weight:800;color:#12283f;margin:10px 0 4px">\uD83C\uDFD7 '+E(pk)+' <span style="color:#6d8199;font-weight:600">\u00B7 received '+money(t.rec)+' \u00B7 paid '+money(t.paid)+' \u00B7 balance '+money(t.bal)+'</span></div>'+
+      '<table class="cos-t" style="width:100%"><thead><tr><th style="width:80px">Date</th><th>Against work order</th><th style="width:110px">Diary No</th><th style="width:90px">Voucher #</th><th style="width:80px">Request No</th><th style="width:110px">IPC</th><th style="text-align:right;width:120px">Received</th><th style="text-align:right;width:120px">Paid</th><th style="width:110px">By</th></tr></thead><tbody>'+
+      l.map(function(r){ var w=bySer[String(r.wo||'').trim().toLowerCase()];
+        return '<tr>'+cell(E(dShort(r.date)))+cell(r.wo?('<b>'+E(r.wo)+'</b>'+(w?(' \u2014 '+E(w.title||w.sub||'')):' <span style="color:#8a6d1a;font-size:.7rem">(not on main sheets)</span>')):'<span style="color:#8798ab">\u2014</span>')+
+          cell(E(r.diary||''))+cell(E(r.voucher||''))+cell('<b>'+E(r.req||'')+'</b>')+cell(E(r.ipc||''))+cell(r.status==='Paid'?'':money(r.amount),'text-align:right;color:#1c7a42;font-weight:700')+cell(r.status==='Paid'?money(r.amount):'','text-align:right;color:#b02a2a;font-weight:700')+cell(E(r.by||''))+'</tr>'; }).join('')+
+      '</tbody></table>'; }).join('');
+  return '<div style="padding:10px 12px 14px;background:#f7fafd">'+
+    '<div style="font-size:.74rem;font-weight:800;color:#12283f;margin:0 0 4px">\uD83D\uDCCB Work orders / contracts on the main sheets \u2014 '+wos.length+'</div>'+woT+looseT+
+    (rows.length?lineT:'<div class="empty" style="padding:10px">No Finance line yet.</div>')+'</div>';
+}
+
+/* ================= LEDGER ================= */
+var LF={from:'',to:'',proj:'',q:'',open:{}};
+function ledRows(){
+  return (FIN.rows||[]).filter(function(r){
+    if(LF.from&&String(r.date)<LF.from)return false; if(LF.to&&String(r.date)>LF.to)return false;
+    if(LF.proj&&String(r.project||'').trim()!==LF.proj)return false;
+    if(LF.q&&String(r.vendor||'').toLowerCase().indexOf(LF.q.toLowerCase())<0)return false;
+    return true;
+  });
+}
+function ledGroups(rows,key){
+  var g={}, order=[];
+  rows.forEach(function(r){
+    if(!String(r.vendor||'').trim()&&!num(r.amount))return;      /* an empty line is not a vendor */
+    var k=String(r[key]||'').trim()||'—'; var kk=k.toLowerCase();
+    if(!g[kk]){ g[kk]={name:k,rec:0,paid:0,n:0,rows:[]}; order.push(kk); }
+    var x=g[kk]; x.n++; x.rows.push(r); if(r.status==='Paid')x.paid+=num(r.amount); else x.rec+=num(r.amount);
+  });
+  return order.map(function(k){ var x=g[k]; x.bal=x.rec-x.paid; return x; }).sort(function(a,b){ return b.bal-a.bal||a.name.localeCompare(b.name); });
+}
+function finLedTab(body){
+  var rows=ledRows(), byV=ledGroups(rows,'vendor'), byP=ledGroups(rows,'project'), tot=sumBy(rows);
+  var rng=(LF.from||LF.to)?((LF.from?dShort(LF.from):'start')+' to '+(LF.to?dShort(LF.to):'today')):'all dates';
+  var venTr=byV.map(function(x){
+    var open=LF.open[x.name];
+    return '<tr><td><button class="g" data-ledx="'+E(x.name)+'" style="padding:2px 7px;margin-right:6px">'+(open?'▾':'▸')+'</button><b>'+E(x.name)+'</b></td>'+
+      '<td style="text-align:right" class="rec">'+money(x.rec)+'</td><td style="text-align:right" class="pay">'+money(x.paid)+'</td>'+
+      '<td style="text-align:right;font-weight:800'+(x.bal<0?';color:#b02a2a':'')+'">'+money(x.bal)+'</td><td style="text-align:right;color:#6d8199">'+x.n+'</td></tr>'+
+      (open?('<tr class="exp"><td colspan="5">'+finVendorDetail(x)+'</td></tr>'):'');
+  }).join('');
+  body.innerHTML=
+    '<div class="cos-card"><div class="cos-ch"><h3>📒 Ledger</h3><span class="hint">bill received · bill paid · balance, vendor by vendor — '+E(rng)+'</span><span class="sp"></span>'+
+      '<button class="g" id="ldXl">⬇ Excel</button><button class="g" id="ldCsv">⬇ CSV</button><button class="g" id="ldPrint">🖨 Print</button></div>'+
+    '<div class="cos-cb"><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">'+
+      '<div><label class="fl">From</label><input type="date" id="ldF" value="'+E(LF.from)+'"></div>'+
+      '<div><label class="fl">To</label><input type="date" id="ldT" value="'+E(LF.to)+'"></div>'+
+      '<div><label class="fl">Project</label><select id="ldP">'+selOpts(finProjects(),LF.proj,'All projects')+'</select></div>'+
+      '<div><label class="fl">Vendor</label><input type="text" id="ldQ" value="'+E(LF.q)+'" placeholder="search a vendor"></div>'+
+      '<div style="display:flex;align-items:flex-end"><button class="g" id="ldC" style="width:100%">Clear</button></div>'+
+    '</div></div></div>'+
+    '<div class="kpi">'+
+      '<div class="b" style="border-left-color:#1c7a42"><div class="n rec">Rs '+money(tot.rec)+'</div><div class="l">Bills received</div></div>'+
+      '<div class="b" style="border-left-color:#b02a2a"><div class="n pay">Rs '+money(tot.paid)+'</div><div class="l">Bills paid</div></div>'+
+      '<div class="b" style="border-left-color:#1d5a8f"><div class="n">Rs '+money(tot.bal)+'</div><div class="l">Balance payable</div></div>'+
+      '<div class="b" style="border-left-color:#5b47a0"><div class="n">'+byV.length+'</div><div class="l">Vendors</div></div>'+
+    '</div>'+
+    '<div class="cos-card"><div class="cos-ch"><h3>🏢 Supplier / Vendor</h3><span class="hint">click ▸ to see the lines behind a figure</span></div><div class="cos-cb" style="padding:0">'+
+      '<div class="cos-tw" style="border:none;border-radius:0"><table class="cos-t"><thead><tr><th>Supplier / Vendor</th><th style="text-align:right;width:150px">Bill Received</th><th style="text-align:right;width:150px">Bill Paid</th><th style="text-align:right;width:150px">Balance</th><th style="text-align:right;width:70px">Lines</th></tr></thead><tbody>'+
+      (venTr||'<tr><td colspan="5" class="empty">Nothing in this range.</td></tr>')+
+      (byV.length?('<tr class="tot"><td>TOTAL</td><td style="text-align:right" class="rec">'+money(tot.rec)+'</td><td style="text-align:right" class="pay">'+money(tot.paid)+'</td><td style="text-align:right">'+money(tot.bal)+'</td><td style="text-align:right">'+byV.reduce(function(s,x){ return s+x.n; },0)+'</td></tr>'):'')+
+      '</tbody></table></div></div></div>'+
+    '<div class="cos-card"><div class="cos-ch"><h3>🏗 By project</h3></div><div class="cos-cb" style="padding:0">'+
+      '<div class="cos-tw" style="border:none;border-radius:0"><table class="cos-t"><thead><tr><th>Project</th><th style="text-align:right;width:150px">Bill Received</th><th style="text-align:right;width:150px">Bill Paid</th><th style="text-align:right;width:150px">Balance</th><th style="text-align:right;width:70px">Lines</th></tr></thead><tbody>'+
+      (byP.length?byP.map(function(x){ return '<tr><td><b>'+E(x.name)+'</b></td><td style="text-align:right" class="rec">'+money(x.rec)+'</td><td style="text-align:right" class="pay">'+money(x.paid)+'</td><td style="text-align:right;font-weight:800">'+money(x.bal)+'</td><td style="text-align:right;color:#6d8199">'+x.n+'</td></tr>'; }).join(''):'<tr><td colspan="5" class="empty">Nothing in this range.</td></tr>')+
+      '</tbody></table></div></div></div>';
+  var q=function(s){ return body.querySelector(s); };
+  q('#ldF').addEventListener('change',function(){ LF.from=this.value; finPaint(); });
+  q('#ldT').addEventListener('change',function(){ LF.to=this.value; finPaint(); });
+  q('#ldP').addEventListener('change',function(){ LF.proj=this.value; finPaint(); });
+  q('#ldQ').addEventListener('input',function(){ LF.q=this.value; clearTimeout(finLedTab._t); finLedTab._t=setTimeout(finPaint,260); });
+  q('#ldC').onclick=function(){ LF={from:'',to:'',proj:'',q:'',open:{}}; finPaint(); };
+  body.querySelectorAll('[data-ledx]').forEach(function(b){ b.onclick=function(){ var k=b.dataset.ledx; if(LF.open[k])delete LF.open[k]; else LF.open[k]=1; finPaint(); }; });
+  q('#ldCsv').onclick=function(){ K().csv('Finance_Ledger_'+today()+'.csv',['Supplier / Vendor','Bill Received','Bill Paid','Balance','Lines'],
+    byV.map(function(x){ return [x.name,x.rec,x.paid,x.bal,x.n]; }).concat([['TOTAL',tot.rec,tot.paid,tot.bal,rows.length]])); };
+  q('#ldXl').onclick=function(){ finExcel(rows,''); };
+  q('#ldPrint').onclick=function(){
+    var tb=function(list){ return '<table><thead><tr><th>Supplier / Vendor</th><th style="width:90px;text-align:right">Bill Received</th><th style="width:90px;text-align:right">Bill Paid</th><th style="width:90px;text-align:right">Balance</th></tr></thead><tbody>'+
+      list.map(function(x){ return '<tr><td>'+E(x.name)+'</td><td style="text-align:right">'+money(x.rec)+'</td><td style="text-align:right">'+money(x.paid)+'</td><td style="text-align:right;font-weight:700">'+money(x.bal)+'</td></tr>'; }).join('')+
+      '<tr><td style="font-weight:800">TOTAL</td><td style="text-align:right;font-weight:800">'+money(tot.rec)+'</td><td style="text-align:right;font-weight:800">'+money(tot.paid)+'</td><td style="text-align:right;font-weight:800">'+money(tot.bal)+'</td></tr></tbody></table>'; };
+    K().print('Ledger — '+rng, finPrintHead('Ledger ('+rng+')')+
+      '<div class="kpi"><div class="b"><div class="n">Rs '+money(tot.rec)+'</div><div class="l">Bills received</div></div><div class="b"><div class="n">Rs '+money(tot.paid)+'</div><div class="l">Bills paid</div></div><div class="b"><div class="n">Rs '+money(tot.bal)+'</div><div class="l">Balance payable</div></div></div>'+
+      '<h2>Supplier / Vendor</h2>'+tb(byV)+'<h2>By project</h2>'+tb(byP)+
+      '<div class="sig"><div>Prepared by</div><div>Checked by</div><div>Approved by</div></div>',false,true);
+  };
+}
+
+/* ================= VENDORS ================= */
+var VEN_OPEN={};
+function finVenTab(body){
+  var g=ledGroups(FIN.rows||[],'vendor'), ed=finCanEdit();
+  var main=finMainVendors(), bills=finMainBills(), have={}; g.forEach(function(x){ have[x.name.toLowerCase()]=x; });
+  main.forEach(function(v){ if(!have[v.toLowerCase()]){ have[v.toLowerCase()]={name:v,rec:0,paid:0,bal:0,n:0}; g.push(have[v.toLowerCase()]); } });
+  var onMain={}; main.forEach(function(v){ onMain[v.toLowerCase()]=1; });
+  g.sort(function(a,b){ return a.name.localeCompare(b.name); });
+  var STC={draft:'#6b7a89|#f1f3f5',submitted:'#9a6410|#fff4e0',verified:'#1d5a8f|#eaf2fb',approved:'#116b86|#e6f5fb',received:'#1c7a42|#e8f7ed',returned:'#b02a2a|#fdecec'};
+  var billsT=function(x){
+    var pb=bills[x.name.toLowerCase()], l=(pb&&pb.list)||[];
+    return '<div style="font-size:.74rem;font-weight:800;color:#12283f;margin:0 0 4px">\uD83E\uDDFE Bills submitted from Site \u2014 '+l.length+(l.length?(' \u00B7 Rs '+money(pb.net)):'')+'</div>'+
+      '<table class="cos-t" style="width:100%"><thead><tr><th style="width:80px">Date</th><th style="width:90px">Bill No</th><th>Project</th><th>Against work order</th><th style="width:95px">Type</th><th style="text-align:right;width:120px">Net amount</th><th style="text-align:right;width:110px">Paid</th><th style="width:110px">Where it is</th></tr></thead><tbody>'+
+      (l.length?l.slice().sort(function(a,b){ return String(a.date).localeCompare(String(b.date)); }).map(function(b){ var c=(STC[b.status]||STC.draft).split('|');
+        return '<tr><td>'+E(dShort(b.date))+'</td><td><b>'+E(b.no||'\u2014')+'</b></td><td>'+E(b.proj)+'</td><td>'+(b.wo?('<b>'+E(b.wo)+'</b>'+(b.title?(' \u2014 '+E(b.title)):'')):'\u2014')+'</td><td>'+E(b.type)+'</td>'+
+          '<td style="text-align:right;font-weight:700">'+money(b.net)+'</td><td style="text-align:right;color:#1c7a42;font-weight:700">'+(b.paid?money(b.paid):'')+'</td>'+
+          '<td><span class="pill" style="background:'+c[1]+';color:'+c[0]+'">'+E(b.status)+'</span></td></tr>'; }).join('')
+        :'<tr><td colspan="8" class="empty" style="padding:10px">No bill submitted from site for this vendor.</td></tr>')+
+      '</tbody></table>';
+  };
+  body.innerHTML='<div class="cos-card"><div class="cos-ch"><h3>\uD83C\uDFE2 Contractors / Vendors</h3><span class="hint">the names come from the main sheets \u2014 Work Orders / Contracts and Progress Bills of every project. Nothing is added here; a name written differently on a Finance line can be pointed back to the right one with \u270E.</span></div>'+
+    '<div class="cos-cb" style="padding:0"><div class="cos-tw" style="border:none;border-radius:0"><table class="cos-t"><thead><tr><th>Name</th><th style="width:120px"></th><th style="text-align:right;width:170px" title="Progress Bills the site has submitted (Contractor / Vendor Bill) — how many, and their net amount">Bill submitted from Site</th><th style="text-align:right;width:80px">Lines</th><th style="text-align:right;width:150px">Received in Accounts</th><th style="text-align:right;width:140px">Paid</th><th style="text-align:right;width:140px">Balance</th><th style="width:60px"></th></tr></thead><tbody>'+
+    (g.length?g.map(function(x){ var ok=onMain[x.name.toLowerCase()];
+      var open=!!VEN_OPEN[x.name.toLowerCase()];
+      return '<tr style="cursor:pointer" data-vopen="'+E(x.name)+'"><td><span style="display:inline-block;width:18px;color:#6d8199">'+(open?'\u25BE':'\u25B8')+'</span><b>'+E(x.name)+'</b></td><td>'+(ok?'<span style="background:#e8f1fb;color:#1d5a8f;border-radius:7px;padding:2px 7px;font-size:.66rem;font-weight:800">main sheets</span>':'<span style="background:#fdf3e2;color:#8a6d1a;border-radius:7px;padding:2px 7px;font-size:.66rem;font-weight:800" title="This name is on Finance lines only \u2014 it is not on the main sheets">not on main sheets</span>')+'</td>'+
+      (function(){ var pb=bills[x.name.toLowerCase()]; return '<td style="text-align:right">'+(pb?('<b>'+money(pb.net)+'</b><div style="font-size:.66rem;color:#6d8199">'+pb.n+' bill'+(pb.n===1?'':'s')+'</div>'):'<span style="color:#8798ab">\u2014</span>')+'</td>'; })()+
+      '<td style="text-align:right">'+x.n+'</td><td style="text-align:right" class="rec">'+money(x.rec)+'</td><td style="text-align:right" class="pay">'+money(x.paid)+'</td><td style="text-align:right;font-weight:800">'+money(x.bal)+'</td>'+
+      '<td style="text-align:right">'+((ed&&x.n)?('<button class="g" data-vr="'+E(x.name)+'" title="Point these lines at a name from the main sheets">\u270E</button>'):'')+'</td></tr>'+
+      (open?('<tr class="exp"><td colspan="8"><div style="padding:10px 12px 4px;background:#f7fafd">'+billsT(x)+'</div>'+finVendorDetail(x)+'</td></tr>'):''); }).join(''):'<tr><td colspan="8" class="empty">No contractor / vendor on the main sheets yet.</td></tr>')+
+    '</tbody></table></div></div></div>';
+  body.querySelectorAll('tr[data-vopen]').forEach(function(tr){ tr.addEventListener('click',function(e){
+    if(e.target.closest('button'))return;
+    var k=tr.dataset.vopen.toLowerCase(); if(VEN_OPEN[k])delete VEN_OPEN[k]; else VEN_OPEN[k]=1; finPaint();
+  }); });
+  if(!ed)return;
+  body.querySelectorAll('[data-vr]').forEach(function(b){ b.onclick=function(){ var from=b.dataset.vr;
+    uiPrompt('Point \u201C'+from+'\u201D at which name from the main sheets?',from).then(function(v){ v=String(v==null?'':v).trim(); if(!v||v===from)return;
+      var hit=finCbMatch(v); if(!hit){ T('\u26A0 \u201C'+v+'\u201D is not on the main sheets.'); return; }
+      var n=0; (FIN.rows||[]).forEach(function(r){ if(String(r.vendor||'').trim().toLowerCase()===from.toLowerCase()){ r.vendor=hit; r._u=nowMs(); n++; } });
+      FIN._u=nowMs(); finSave(); finPaint(); T('\u270E '+n+' line'+(n===1?'':'s')+' now read \u201C'+hit+'\u201D.'); }); }; });
+}
+
+
+/* ================= SETTINGS — who may open Finance ================= */
+function finSetTab(body){
+  if(!finIsAdmin()){ body.innerHTML='<div class="empty">Settings are for Admins.</div>'; return; }
+  var users=[]; try{ users=(mrLoad().users||[]).filter(function(u){ return u&&u.active!==0; }); }catch(e){}
+  users.sort(function(a,b){ return String(a.name||'').localeCompare(String(b.name||'')); });
+  var acc=FIN.access||{};
+  var rows=users.map(function(u){
+    var id=String(u.id), a=acc[id]||{}, r=(u.role==='admin')?'admin':(a.r||'none');
+    var mt=''; try{ var tt=u.access&&u.access.__tiles; if(tt&&(tt.fin==='view'||tt.fin==='edit'))mt=tt.fin; }catch(e){}
+    var who=(a.by?(' · by '+E(a.by)):'')+(a.t?(' · '+E(dShort(isoDay(new Date(a.t))))):'');
+    return '<tr><td><b>'+E(u.name||'(no name)')+'</b>'+(u.desig?('<div style="font-size:.7rem;color:#6d8199">'+E(u.desig)+'</div>'):'')+'</td>'+
+      '<td>'+E(u.role==='admin'?'Admin':(u.role==='readonly'?'View-only account':'User'))+'</td>'+
+      '<td>'+(u.role==='admin'
+        ?'<span style="background:#e8f1fb;color:#1d5a8f;border-radius:7px;padding:3px 9px;font-size:.7rem;font-weight:800">Admin — everything, always</span>'
+        :mt?('<span style="background:#e8f7ed;color:#1c7a42;border-radius:7px;padding:3px 9px;font-size:.7rem;font-weight:800">'+finRoleTxt(mt)+' — set in ⚙ Master Settings</span>')
+        :('<select data-acc="'+E(id)+'" data-nm="'+E(u.name||'')+'" style="max-width:220px">'+
+            '<option value="none"'+(r==='none'?' selected':'')+'>✖ No access — tile not shown</option>'+
+            '<option value="view"'+(r==='view'?' selected':'')+'>👁 View only — sheet, ledger, reports, print</option>'+
+            '<option value="edit"'+(r==='edit'?' selected':'')+'>✎ View + Edit — may post lines and lock days</option>'+
+          '</select>'))+'</td>'+
+      '<td style="font-size:.72rem;color:#6d8199">'+(u.role==='admin'?'':(r!=='none'?('given'+who):''))+'</td></tr>';
+  }).join('');
+  body.innerHTML='<div class="cos-card"><div class="cos-ch"><h3>⚙️ Who may open Finance</h3>'+
+      '<span class="hint">the users are the ones in ⚙ Master Settings — pick, for each, what Finance shows them. It takes effect on every laptop.</span></div>'+
+    '<div class="cos-cb">'+
+      '<div style="font-size:.78rem;color:#41586f;line-height:1.6;margin-bottom:10px">'+
+        '<b>Admins</b> always have everything — the sheet, Import, Settings, and the master / admin passwords still apply where they do. '+
+        '<b>View only</b> sees Daily In / Out, the Ledger, Vendors and Reports, and can print and export, but changes nothing. '+
+        '<b>View + Edit</b> can also post lines and Save &amp; Lock a day; unlocking and removing a line still ask for the admin password.</div>'+
+      '<div class="cos-tw"><table class="cos-t"><thead><tr><th>User</th><th style="width:150px">Account</th><th style="width:330px">Finance</th><th>Given</th></tr></thead><tbody>'+
+      (rows||'<tr><td colspan="4" class="empty">No user in Master Settings yet.</td></tr>')+'</tbody></table></div>'+
+    '</div></div>';
+  body.querySelectorAll('[data-acc]').forEach(function(sl){ sl.addEventListener('change',function(){
+    FIN.access=FIN.access||{};
+    FIN.access[sl.dataset.acc]={r:sl.value,name:sl.dataset.nm,by:finWho(),t:nowMs()};
+    FIN._u=nowMs(); finSave(); finPaint();
+    T(sl.value==='none'?('✖ '+sl.dataset.nm+' can no longer open Finance.'):('✅ '+sl.dataset.nm+' — '+finRoleTxt(sl.value)+'.'));
+  }); });
+}
+
+/* ================= REPORTS — for printing ================= */
+var RP={kind:'vendor',from:'',to:'',proj:'',vendor:'',status:'',lines:false};
+var RP_KINDS=[
+  ['vendor','🏢 Vendor ledger'],
+  ['date','📅 Date-wise ledger'],
+  ['project','🏗 Project-wise ledger'],
+  ['wo','📋 Work-order-wise ledger'],
+  ['lines','📄 Daily In / Out register']
+];
+function rpRows(){
+  return (FIN.rows||[]).filter(function(r){
+    if(!String(r.vendor||'').trim()&&!num(r.amount))return false;
+    if(RP.from&&String(r.date)<RP.from)return false; if(RP.to&&String(r.date)>RP.to)return false;
+    if(RP.proj&&String(r.project||'').trim()!==RP.proj)return false;
+    if(RP.vendor&&String(r.vendor||'').trim().toLowerCase()!==RP.vendor.toLowerCase())return false;
+    if(RP.status&&r.status!==RP.status)return false;
+    return true;
+  }).sort(rowSort);
+}
+function rpRange(){ return (RP.from||RP.to)?((RP.from?dShort(RP.from):'start')+' to '+(RP.to?dShort(RP.to):'today')):'all dates'; }
+function rpTd(v,st){ return '<td style="'+(st||'')+'">'+v+'</td>'; }
+var RPR='text-align:right', RPB='text-align:right;font-weight:800';
+function rpLinesTable(list,cols){
+  /* cols: which of date, vendor, project, wo, diary, voucher, ipc, by to show */
+  var c=cols||['date','vendor','project','wo','diary','voucher','req','ipc','by'];
+  var H={date:'Date',vendor:'Contractor / Vendor',project:'Project',wo:'Work order',diary:'Diary No',voucher:'Voucher #',req:'Request No',ipc:'IPC',by:'Posted by'};
+  var bySer={}; finMainWOs().forEach(function(w){ bySer[w.serial.toLowerCase()]=w; });
+  var t=sumBy(list);
+  return '<table class="cos-t" style="width:100%"><thead><tr>'+c.map(function(k){ return '<th>'+H[k]+'</th>'; }).join('')+
+    '<th style="text-align:right;width:110px">Received</th><th style="text-align:right;width:110px">Paid</th></tr></thead><tbody>'+
+    list.map(function(r){ return '<tr>'+c.map(function(k){
+        var v=k==='date'?dShort(r.date):(k==='wo'?(r.wo?(r.wo+(bySer[String(r.wo).toLowerCase()]?(' — '+bySer[String(r.wo).toLowerCase()].title):'')):''):(r[k]||''));
+        return rpTd(k==='req'?('<b>'+E(v)+'</b>'):E(v)); }).join('')+
+      rpTd(r.status==='Paid'?'':money(r.amount),RPR+';color:#1c7a42;font-weight:700')+rpTd(r.status==='Paid'?money(r.amount):'',RPR+';color:#b02a2a;font-weight:700')+'</tr>'; }).join('')+
+    '<tr class="tot">'+rpTd('TOTAL — '+list.length+' line'+(list.length===1?'':'s'),'')+c.slice(1).map(function(){ return rpTd(''); }).join('')+rpTd(money(t.rec),RPB)+rpTd(money(t.paid),RPB)+'</tr></tbody></table>';
+}
+function rpBuild(){
+  var list=rpRows(), tot=sumBy(list), h='';
+  var head3='<th style="text-align:right;width:130px">Bill Received</th><th style="text-align:right;width:130px">Bill Paid</th><th style="text-align:right;width:130px">Balance</th>';
+  var totRow=function(label,extra){ return '<tr class="tot">'+rpTd(label)+(extra||'')+rpTd(money(tot.rec),RPB)+rpTd(money(tot.paid),RPB)+rpTd(money(tot.bal),RPB)+'</tr>'; };
+  if(RP.kind==='vendor'){
+    var g=ledGroups(list,'vendor');
+    h='<table class="cos-t" style="width:100%"><thead><tr><th>Contractor / Vendor</th><th style="text-align:right;width:60px">Lines</th>'+head3+'</tr></thead><tbody>'+
+      g.map(function(x){ return '<tr>'+rpTd('<b>'+E(x.name)+'</b>')+rpTd(x.n,RPR)+rpTd(money(x.rec),RPR)+rpTd(money(x.paid),RPR)+rpTd(money(x.bal),RPB)+'</tr>'+
+        (RP.lines?('<tr class="exp"><td colspan="5"><div style="padding:6px 10px 10px">'+rpLinesTable(x.rows.slice().sort(rowSort),['date','project','wo','diary','voucher','req','ipc','by'])+'</div></td></tr>'):''); }).join('')+
+      totRow('TOTAL',rpTd(list.length,RPR))+'</tbody></table>';
+  }else if(RP.kind==='date'){
+    var byD={}, ord=[]; list.forEach(function(r){ var k=r.date||'—'; if(!byD[k]){ byD[k]={rec:0,paid:0,n:0,rows:[]}; ord.push(k); } var x=byD[k]; x.n++; x.rows.push(r); if(r.status==='Paid')x.paid+=num(r.amount); else x.rec+=num(r.amount); });
+    ord.sort(); var run=0;
+    h='<table class="cos-t" style="width:100%"><thead><tr><th>Date</th><th style="text-align:right;width:60px">Lines</th><th style="text-align:right;width:130px">Received</th><th style="text-align:right;width:130px">Paid</th><th style="text-align:right;width:130px">Day balance</th><th style="text-align:right;width:140px">Running balance</th></tr></thead><tbody>'+
+      ord.map(function(k){ var x=byD[k]; run+=x.rec-x.paid;
+        return '<tr>'+rpTd('<b>'+E(dLong(k))+'</b>')+rpTd(x.n,RPR)+rpTd(money(x.rec),RPR)+rpTd(money(x.paid),RPR)+rpTd(money(x.rec-x.paid),RPB)+rpTd(money(run),RPB)+'</tr>'+
+          (RP.lines?('<tr class="exp"><td colspan="6"><div style="padding:6px 10px 10px">'+rpLinesTable(x.rows,['vendor','project','wo','diary','voucher','req','ipc','by'])+'</div></td></tr>'):''); }).join('')+
+      '<tr class="tot">'+rpTd('TOTAL')+rpTd(list.length,RPR)+rpTd(money(tot.rec),RPB)+rpTd(money(tot.paid),RPB)+rpTd(money(tot.bal),RPB)+rpTd(money(tot.bal),RPB)+'</tr></tbody></table>';
+  }else if(RP.kind==='project'){
+    var gp=ledGroups(list,'project');
+    h='<table class="cos-t" style="width:100%"><thead><tr><th>Project</th><th style="text-align:right;width:60px">Lines</th>'+head3+'</tr></thead><tbody>'+
+      gp.map(function(x){ var gv=ledGroups(x.rows,'vendor');
+        return '<tr>'+rpTd('<b>'+E(x.name)+'</b>')+rpTd(x.n,RPR)+rpTd(money(x.rec),RPR)+rpTd(money(x.paid),RPR)+rpTd(money(x.bal),RPB)+'</tr>'+
+          '<tr class="exp"><td colspan="5"><div style="padding:4px 10px 10px"><table class="cos-t" style="width:100%"><thead><tr><th>Contractor / Vendor</th><th style="text-align:right;width:60px">Lines</th>'+head3+'</tr></thead><tbody>'+
+          gv.map(function(v){ return '<tr>'+rpTd(E(v.name))+rpTd(v.n,RPR)+rpTd(money(v.rec),RPR)+rpTd(money(v.paid),RPR)+rpTd(money(v.bal),RPB)+'</tr>'+
+            (RP.lines?('<tr class="exp"><td colspan="5"><div style="padding:4px 10px 8px">'+rpLinesTable(v.rows.slice().sort(rowSort),['date','wo','diary','voucher','req','ipc','by'])+'</div></td></tr>'):''); }).join('')+
+          '</tbody></table></div></td></tr>'; }).join('')+
+      totRow('TOTAL',rpTd(list.length,RPR))+'</tbody></table>';
+  }else if(RP.kind==='wo'){
+    var wos=finMainWOs(), bySer2={}; wos.forEach(function(w){ bySer2[w.serial.toLowerCase()]=w; });
+    var gv2=ledGroups(list,'vendor');
+    h='<table class="cos-t" style="width:100%"><thead><tr><th>Contractor / Vendor · Work order</th><th>Project</th><th style="text-align:right;width:130px">Contract value</th><th style="text-align:right;width:60px">Lines</th>'+head3+'</tr></thead><tbody>'+
+      gv2.map(function(v){
+        var byW={}, wo=[]; v.rows.forEach(function(r){ var k=String(r.wo||'').trim().toLowerCase(); if(!byW[k]){ byW[k]={rec:0,paid:0,n:0,rows:[]}; wo.push(k); } var x=byW[k]; x.n++; x.rows.push(r); if(r.status==='Paid')x.paid+=num(r.amount); else x.rec+=num(r.amount); });
+        /* work orders of this vendor with no line yet still show, so the picture is complete */
+        wos.filter(function(w){ return w.vendor.toLowerCase()===v.name.toLowerCase()&&!byW[w.serial.toLowerCase()]; }).forEach(function(w){ byW[w.serial.toLowerCase()]={rec:0,paid:0,n:0,rows:[]}; wo.push(w.serial.toLowerCase()); });
+        wo.sort();
+        return '<tr>'+rpTd('<b>'+E(v.name)+'</b>')+rpTd('')+rpTd('')+rpTd(v.n,RPR)+rpTd(money(v.rec),RPR)+rpTd(money(v.paid),RPR)+rpTd(money(v.bal),RPB)+'</tr>'+
+          wo.map(function(k){ var x=byW[k], w=bySer2[k];
+            return '<tr>'+rpTd('<span style="display:inline-block;width:18px"></span>'+(k?('<b>'+E(w?w.serial:k)+'</b>'+(w?(' — '+E(w.title||w.sub||'')):' <span style="color:#8a6d1a;font-size:.7rem">(not on main sheets)</span>')):'<span style="color:#8798ab">no work order on the line</span>'))+
+              rpTd(E(w?w.proj:''))+rpTd(w?money(w.value):'',RPR)+rpTd(x.n,RPR)+rpTd(money(x.rec),RPR)+rpTd(money(x.paid),RPR)+rpTd(money(x.rec-x.paid),RPB)+'</tr>'+
+              (RP.lines&&x.rows.length?('<tr class="exp"><td colspan="7"><div style="padding:4px 10px 8px 28px">'+rpLinesTable(x.rows.slice().sort(rowSort),['date','project','diary','voucher','req','ipc','by'])+'</div></td></tr>'):''); }).join(''); }).join('')+
+      totRow('TOTAL',rpTd('')+rpTd('')+rpTd(list.length,RPR))+'</tbody></table>';
+  }else{
+    h=rpLinesTable(list);
+  }
+  return {html:h,list:list,tot:tot};
+}
+function finRepTab(body){
+  var vendors=finVendors(), projs=finProjects();
+  var kindLbl=(RP_KINDS.filter(function(k){ return k[0]===RP.kind; })[0]||RP_KINDS[0])[1];
+  var built=rpBuild();
+  body.innerHTML=
+    '<div class="cos-card"><div class="cos-ch"><h3>🖨 Reports</h3><span class="hint">pick a report, narrow it down, then print or take it to Excel</span><span class="sp"></span>'+
+      '<button class="p" id="rpPrint">🖨 Print</button><button class="g" id="rpXl">⬇ Excel</button></div>'+
+    '<div class="cos-cb">'+
+      '<div class="rep-pick" style="margin-bottom:12px">'+RP_KINDS.map(function(k){ return '<button data-rk="'+k[0]+'"'+(RP.kind===k[0]?' class="on"':'')+'>'+k[1]+'</button>'; }).join('')+'</div>'+
+      '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">'+
+        '<div><label class="fl">From</label><input type="date" id="rpF" value="'+E(RP.from)+'"></div>'+
+        '<div><label class="fl">To</label><input type="date" id="rpT" value="'+E(RP.to)+'"></div>'+
+        '<div><label class="fl">Project</label><select id="rpP">'+selOpts(projs,RP.proj,'All projects')+'</select></div>'+
+        '<div><label class="fl">Vendor</label><select id="rpV">'+selOpts(vendors,RP.vendor,'All vendors')+'</select></div>'+
+        '<div><label class="fl">Status</label><select id="rpS">'+selOpts(FIN_STATUS,RP.status,'Received + Paid')+'</select></div>'+
+        '<div style="display:flex;align-items:flex-end;gap:6px"><label style="display:flex;align-items:center;gap:6px;font-size:.76rem;font-weight:700;color:#41586f;padding:7px 0"><input type="checkbox" id="rpL"'+(RP.lines?' checked':'')+' style="width:auto">show the lines</label>'+
+          '<button class="g" id="rpC" style="margin-left:auto">Clear</button></div>'+
+      '</div>'+
+    '</div></div>'+
+    '<div class="kpi">'+
+      '<div class="b" style="border-left-color:#1c7a42"><div class="n rec">Rs '+money(built.tot.rec)+'</div><div class="l">Bills received</div></div>'+
+      '<div class="b" style="border-left-color:#b02a2a"><div class="n pay">Rs '+money(built.tot.paid)+'</div><div class="l">Bills paid</div></div>'+
+      '<div class="b" style="border-left-color:#1d5a8f"><div class="n">Rs '+money(built.tot.bal)+'</div><div class="l">Balance</div></div>'+
+      '<div class="b" style="border-left-color:#5b47a0"><div class="n">'+built.list.length+'</div><div class="l">Lines</div></div>'+
+    '</div>'+
+    '<div class="cos-card"><div class="cos-ch"><h3>'+kindLbl+'</h3><span class="hint">'+E(rpRange())+(RP.proj?(' · '+E(RP.proj)):'')+(RP.vendor?(' · '+E(RP.vendor)):'')+(RP.status?(' · '+E(RP.status)):'')+'</span></div>'+
+      '<div class="cos-cb" style="padding:0"><div class="cos-tw" style="border:none;border-radius:0" id="rpOut">'+(built.list.length?built.html:'<div class="empty">Nothing in this range.</div>')+'</div></div></div>';
+  var q=function(s){ return body.querySelector(s); };
+  body.querySelectorAll('[data-rk]').forEach(function(b){ b.onclick=function(){ RP.kind=b.dataset.rk; finPaint(); }; });
+  q('#rpF').addEventListener('change',function(){ RP.from=this.value; finPaint(); });
+  q('#rpT').addEventListener('change',function(){ RP.to=this.value; finPaint(); });
+  q('#rpP').addEventListener('change',function(){ RP.proj=this.value; finPaint(); });
+  q('#rpV').addEventListener('change',function(){ RP.vendor=this.value; finPaint(); });
+  q('#rpS').addEventListener('change',function(){ RP.status=this.value; finPaint(); });
+  q('#rpL').addEventListener('change',function(){ RP.lines=this.checked; finPaint(); });
+  q('#rpC').onclick=function(){ RP={kind:RP.kind,from:'',to:'',proj:'',vendor:'',status:'',lines:false}; finPaint(); };
+  q('#rpXl').onclick=function(){ finExcel(built.list,''); };
+  q('#rpPrint').onclick=function(){
+    var sub=kindLbl.replace(/^\S+\s/,'')+' · '+rpRange()+(RP.proj?(' · '+RP.proj):'')+(RP.vendor?(' · '+RP.vendor):'')+(RP.status?(' · '+RP.status):'');
+    var html=built.html.replace(/class="cos-t"/g,'').replace(/class="tot"/g,'style="font-weight:800;background:#f2f5f8"').replace(/class="exp"/g,'');
+    K().print('Finance — '+sub, finPrintHead(sub)+
+      '<div class="kpi"><div class="b"><div class="n">Rs '+money(built.tot.rec)+'</div><div class="l">Bills received</div></div><div class="b"><div class="n">Rs '+money(built.tot.paid)+'</div><div class="l">Bills paid</div></div><div class="b"><div class="n">Rs '+money(built.tot.bal)+'</div><div class="l">Balance</div></div><div class="b"><div class="n">'+built.list.length+'</div><div class="l">Lines</div></div></div>'+
+      html+'<div class="sig"><div>Prepared by</div><div>Checked by</div><div>Approved by</div></div>', RP.kind==='lines'||RP.kind==='wo'||RP.lines, true);
+  };
+}
+
+/* ================= print / excel / import ================= */
+function finPrintHead(sub){
+  return '<div class="hd"><div><h1>Finance — '+E(sub)+'</h1><div style="font-size:10.5px;color:#6d8199">The Vertical · Daily In / Out and Ledger — all projects</div></div>'+
+    '<div class="r">Printed '+E(dLong(today()))+'<br>'+E(finWho())+'</div></div>';
+}
+function finPrintIo(list,tot,d){
+  var ttl=IO.all?'Daily In / Out — all dates':'Daily In / Out — '+dLong(d);
+  K().print(ttl, finPrintHead(IO.all?'Daily In / Out (all dates)':'Daily In / Out · '+dLong(d))+
+    '<table><thead><tr><th style="width:26px">S.No</th><th style="width:58px">Date</th><th>Contractor / Vendor</th><th style="width:60px">Project</th><th style="width:70px">Diary No</th><th style="width:60px">WO #</th><th style="width:60px">Voucher #</th><th style="width:56px">Request No</th><th style="width:70px">IPC</th><th style="width:80px;text-align:right">Amount</th><th style="width:58px">Status</th><th style="width:60px">By</th></tr></thead><tbody>'+
+    list.map(function(r,i){ return '<tr><td>'+num(r._c)+'</td><td>'+E(dShort(r.date))+'</td><td>'+E(r.vendor||'')+'</td><td>'+E(r.project||'')+'</td><td>'+E(r.diary||'')+'</td><td>'+E(r.wo||'')+'</td><td>'+E(r.voucher||'')+'</td><td><b>'+E(r.req||'')+'</b></td><td>'+E(r.ipc||'')+'</td><td style="text-align:right">'+money(r.amount)+'</td><td>'+E(r.status||'')+'</td><td>'+E(r.by||'')+'</td></tr>'; }).join('')+
+    '<tr><td colspan="9" style="text-align:right;font-weight:800">Received '+money(tot.rec)+' · Paid '+money(tot.paid)+'</td><td style="text-align:right;font-weight:800">'+money(tot.bal)+'</td><td colspan="2">received − paid</td></tr></tbody></table>'+
+    '<div class="sig"><div>Posted by</div><div>Checked by</div><div>Approved by</div></div>',true,true);
+}
+var IO_COLS=['S.No','Date','Contractor / Vendor Name','Project','Diary No','Work order #','Voucher #','Request No','IPC No','Amount','Status','Posted By'];
+function finExcel(list,d){
+  var rows=list.slice().sort(rowSort).map(function(r,i){ return [num(r._c),r.date||'',r.vendor||'',r.project||'',r.diary||'',r.wo||'',r.voucher||'',r.req||'',r.ipc||'',num(r.amount),r.status||'',r.by||'']; });
+  var byV=ledGroups(list,'vendor'), tot=sumBy(list);
+  var led=byV.map(function(x){ return [x.name,x.rec,x.paid,x.bal]; }); led.push(['TOTAL',tot.rec,tot.paid,tot.bal]);
+  try{
+    var sheets=[
+      xlsxSheet({raw:true,name:'Daily In Out',head:IO_COLS,align:['i','d','l','l','l','l','l','l','l','m','c','l'],rows:rows}),
+      xlsxSheet({raw:true,name:'Ledger',head:['Supplier / Vendor','Bill Received','Bill Paid','Balance'],align:['l','m','m','m'],rows:led})
+    ];
+    var kb=Math.round(xlsxBuild(sheets,'Finance-'+(d||'all')+'-'+today()+'.xlsx')/1024);
+    T('⬇ '+rows.length+' line'+(rows.length===1?'':'s')+' + ledger exported ('+kb+' KB).');
+  }catch(e){ K().csv('Finance_'+today()+'.csv',IO_COLS,rows); }
+}
+/* ---- import: the "Daily In Out" sheet, headings matched by name ---- */
+function finHeadMap(row){
+  var m={}, look=function(t){ return String(t==null?'':t).toLowerCase().replace(/[^a-z0-9#]/g,''); };
+  (row||[]).forEach(function(c,i){ var t=look(c); if(!t)return;
+    if(m.sno==null&&/^(sno|sr|srno|serial|no)$/.test(t))m.sno=i;
+    else if(m.date==null&&/^date/.test(t))m.date=i;
+    else if(m.vendor==null&&/(vendor|contractor|supplier|party|name)/.test(t))m.vendor=i;
+    else if(m.project==null&&/^project/.test(t))m.project=i;
+    else if(m.diary==null&&/diary/.test(t))m.diary=i;
+    else if(m.wo==null&&/(workorder|^wo)/.test(t))m.wo=i;
+    else if(m.voucher==null&&/vouc/.test(t))m.voucher=i;
+    else if(m.req==null&&/(request|reqno|billno)/.test(t))m.req=i;
+    else if(m.ipc==null&&/ipc/.test(t))m.ipc=i;
+    else if(m.amount==null&&/(amount|amt|rs)/.test(t))m.amount=i;
+    else if(m.status==null&&/status/.test(t))m.status=i;
+    else if(m.by==null&&/(posted|by|user)/.test(t))m.by=i; });
+  return m;
+}
+function finParse(aoa){
+  var hdr=-1,col=null;
+  for(var r=0;r<Math.min(aoa.length,30);r++){ var m=finHeadMap(aoa[r]); if(m.date!=null&&m.amount!=null&&m.vendor!=null){ hdr=r; col=m; break; } }
+  if(hdr<0)return {rows:[],bad:[],err:'The sheet needs a header row with Date, Contractor / Vendor Name and Amount.'};
+  var out=[],bad=[];
+  for(var i=hdr+1;i<aoa.length;i++){
+    var rw=aoa[i]||[], g=function(k){ return col[k]==null?'':String(rw[col[k]]==null?'':rw[col[k]]).trim(); };
+    var d=ISOd(col.date==null?'':rw[col.date]), v=g('vendor'), a=num(g('amount'));
+    if(!d&&!v&&!a)continue;
+    if(!d){ bad.push({row:i+1,why:'no date',what:v}); continue; }
+    if(!v){ bad.push({row:i+1,why:'no vendor',what:d}); continue; }
+    if(!a){ bad.push({row:i+1,why:'amount is zero',what:v}); continue; }
+    var st=/paid/i.test(g('status'))?'Paid':'Received';
+    out.push({date:d,vendor:v,project:g('project'),diary:g('diary'),wo:g('wo'),voucher:g('voucher'),req:g('req'),ipc:g('ipc'),amount:a,status:st,by:g('by')||finWho()});
+  }
+  return {rows:out,bad:bad,err:''};
+}
+/* the master password, asked afresh — only its fingerprint lives here */
+var FIN_MASTER='1770719213';
+async function finMasterAsk(what){
+  if(!finAllowed()){ T('🔒 Admins only.'); return false; }
+  var p=null; try{ p=await pinDialog('🔐 MASTER password — '+what+':',false); }catch(e){ return false; }
+  if(p===null)return false;
+  var h=''; try{ h=hashPin(String(p).trim()); }catch(e){ return false; }
+  var have=''; try{ have=(mrLoad()||{}).pass||''; }catch(e){}
+  if(h===FIN_MASTER||(have&&h===have))return true;
+  T('❌ Wrong master password — nothing was imported.'); return false;
+}
+function finImportAsk(){
+  Promise.resolve(finMasterAsk('to import the Finance sheet')).then(function(ok){
+    if(!ok)return;
+    var f=document.getElementById('finImpFile');
+    if(!f){ f=document.createElement('input'); f.type='file'; f.id='finImpFile'; f.accept='.xlsx,.xls,.csv'; f.style.display='none'; document.body.appendChild(f);
+      f.addEventListener('change',function(e){ var file=e.target.files&&e.target.files[0]; e.target.value=''; finImportFile(file); }); }
+    f.click();
+  });
+}
+function finImportFile(file){
+  if(!file)return; T('Reading '+file.name+'…');
+  var fr=new FileReader();
+  fr.onload=function(){
+    var done=function(aoa){ var p=finParse(aoa||[]); if(p.err){ T('⚠ '+p.err); return; } if(!p.rows.length){ T('Nothing could be read from that sheet.'); return; } finImportPreview(p,file.name); };
+    if(/\.csv$/i.test(file.name)){ try{ done(parseDelimited(String(fr.result))); }catch(e){ T('That file could not be read.'); } return; }
+    loadXLSX().then(function(){ try{
+      var wb=XLSX.read(new Uint8Array(fr.result),{type:'array',cellDates:true}); var best=null,bn=-1;
+      wb.SheetNames.forEach(function(nm){ var a=XLSX.utils.sheet_to_json(wb.Sheets[nm],{header:1,defval:'',raw:true}); var got=finParse(a).rows.length; if(got>bn){ bn=got; best=a; } });
+      done(best||[]); }catch(e){ T('That file could not be read as Excel.'); } }).catch(function(){ T('The Excel reader could not be loaded.'); });
+  };
+  if(/\.csv$/i.test(file.name))fr.readAsText(file); else fr.readAsArrayBuffer(file);
+}
+function finImportPreview(p,fname){
+  var key=function(r){ return [r.date,String(r.vendor).toLowerCase(),r.diary,r.voucher,r.ipc,num(r.amount),r.status].join('|'); };
+  var have={}; (FIN.rows||[]).forEach(function(r){ have[key(r)]=1; });
+  var fresh=p.rows.filter(function(r){ return !have[key(r)]; }), dup=p.rows.length-fresh.length;
+  var tot=sumBy(fresh);
+  var ov=document.getElementById('finImpOv'); if(ov)ov.remove();
+  ov=document.createElement('div'); ov.id='finImpOv';
+  ov.style.cssText='position:fixed;inset:0;z-index:2147483300;background:rgba(10,25,45,.55);display:flex;align-items:center;justify-content:center;padding:20px';
+  ov.innerHTML='<div style="background:#fff;border-radius:15px;max-width:1000px;width:100%;max-height:88vh;display:flex;flex-direction:column;overflow:hidden;font-family:inherit;box-shadow:0 24px 60px rgba(10,25,45,.35)">'+
+    '<div style="padding:15px 18px;border-bottom:1px solid #e3eaf2"><div style="font-weight:800;color:#12283f;font-size:.98rem">⬆ Import Daily In / Out — '+E(fname)+'</div>'+
+      '<div style="font-size:.78rem;color:#6d8199;margin-top:3px"><b>'+fresh.length+'</b> new line'+(fresh.length===1?'':'s')+' · received Rs '+money(tot.rec)+' · paid Rs '+money(tot.paid)+
+      (dup?(' · <span style="color:#9a6410;font-weight:700">'+dup+' already on record, skipped</span>'):'')+(p.bad.length?(' · <span style="color:#b02a2a;font-weight:700">'+p.bad.length+' skipped</span>'):'')+'</div></div>'+
+    '<div style="overflow:auto;padding:0 18px">'+(p.bad.length?('<div style="background:#fdf3e2;border:1px solid #e6c98a;border-radius:9px;padding:8px 11px;margin:12px 0 0;font-size:.76rem;color:#8a6d1a;max-height:100px;overflow:auto">'+p.bad.slice(0,10).map(function(b){ return 'Row '+b.row+': '+E(b.what||'')+' — '+E(b.why); }).join('<br>')+'</div>'):'')+
+      '<table style="width:100%;border-collapse:collapse;font-size:.78rem;margin:12px 0"><thead><tr>'+['#','Date','Vendor','Project','Diary','WO','Voucher','IPC','Amount','Status','By'].map(function(h){ return '<th style="background:#123d2b;color:#fff;padding:6px 8px;text-align:left;font-size:.68rem;text-transform:uppercase;position:sticky;top:0">'+h+'</th>'; }).join('')+'</tr></thead><tbody>'+
+      fresh.slice(0,60).map(function(r,i){ return '<tr>'+[i+1,dShort(r.date),r.vendor,r.project,r.diary,r.wo,r.voucher,r.ipc,money(r.amount),r.status,r.by].map(function(v,j){ return '<td style="border:1px solid #dbe5ef;padding:4px 8px;white-space:nowrap'+(j===8?';text-align:right;font-weight:700':'')+'">'+E(v)+'</td>'; }).join('')+'</tr>'; }).join('')+
+      '</tbody></table>'+(fresh.length>60?('<div style="font-size:.76rem;color:#6d8199;padding-bottom:10px">…and '+(fresh.length-60)+' more.</div>'):'')+'</div>'+
+    '<div style="padding:13px 18px;border-top:1px solid #e3eaf2;background:#f7fafd;display:flex;gap:9px;align-items:center">'+
+      '<button id="fiAdd" style="background:#1f6b48;border:none;border-radius:9px;padding:9px 16px;font-size:.82rem;font-weight:700;color:#fff;cursor:pointer;font-family:inherit"'+(fresh.length?'':' disabled')+'>➕ Add '+fresh.length+' line'+(fresh.length===1?'':'s')+'</button>'+
+      '<span style="flex:1"></span><button id="fiX" style="background:#eef3f8;border:1px solid #dde5ee;border-radius:9px;padding:9px 15px;font-size:.82rem;font-weight:700;color:#27486a;cursor:pointer;font-family:inherit">Cancel</button></div></div>';
+  document.body.appendChild(ov);
+  var close=function(){ ov.remove(); };
+  ov.querySelector('#fiX').onclick=close;
+  ov.querySelector('#fiAdd').onclick=function(){
+    var locked=0;
+    fresh.forEach(function(r){ if(finLocked(r.date)){ locked++; return; } FIN.seq.row=num(FIN.seq.row)+1; FIN.rows.push(Object.assign({id:uid(),note:'',_c:FIN.seq.row,_u:nowMs()},r)); });
+    FIN._u=nowMs(); finSave(); close(); finPaint();
+    T('✅ '+(fresh.length-locked)+' line'+(fresh.length-locked===1?'':'s')+' added.'+(locked?(' '+locked+' fell on locked days and were left out.'):''));
+  };
+}
+
+/* ================= the tile, beside COS Data ================= */
+function finTileHTML(){
+  var n=0,rec=0,paid=0;
+  try{ var raw=localStorage.getItem(FIN_LS); var d=raw?JSON.parse(raw):null;
+    if(d)(d.rows||[]).forEach(function(r){ n++; if(r.status==='Paid')paid+=num(r.amount); else rec+=num(r.amount); }); }catch(e){}
+  var note=n?(n+' line'+(n===1?'':'s')+' · payable Rs '+money(rec-paid)):'Daily In / Out · Ledger';
+  return '<button class="lg-proj" data-findata="1" style="border-color:#8fa6bd">'+
+    '<span style="display:inline-flex;align-items:center;justify-content:center;width:92px;height:52px;background:linear-gradient(135deg,#12283f,#1b3d5e);color:#fff;border-radius:10px;font-size:1.5rem">💵</span>'+
+    '<span class="t"><span class="n">Finance</span><span class="s">'+E(note)+'</span></span><span class="go">›</span></button>';
+}
+function finTile(){
+  var box=document.getElementById('lgPickList'); if(!box)return;
+  var grid=box.querySelector('.lg-grid'); if(!grid)return;
+  if(!finAllowed()){ grid.querySelectorAll('[data-findata]').forEach(function(b){ b.remove(); }); return; }
+  if(grid.querySelector('[data-findata]'))return;
+  var wrap=document.createElement('div'); wrap.innerHTML=finTileHTML(); var b=wrap.firstChild;
+  var cos=grid.querySelector('[data-cosdata]');
+  if(cos&&cos.nextSibling)grid.insertBefore(b,cos.nextSibling); else grid.appendChild(b);
+  b.onclick=function(){ finOpen(); };
+}
+(function(){
+  var hook=function(){
+    if(typeof window.renderProjectPicker!=='function')return false;
+    if(window.renderProjectPicker.__fin)return true;
+    var orig=window.renderProjectPicker;
+    var wrapped=function(){ var r=orig.apply(this,arguments); try{ setTimeout(finTile,0); }catch(e){} return r; };
+    wrapped.__fin=1; wrapped.__cos=orig.__cos;
+    window.renderProjectPicker=wrapped; try{ renderProjectPicker=wrapped; }catch(e){}
+    return true;
+  };
+  if(!hook()){ var n=0, iv=setInterval(function(){ if(hook()||++n>40)clearInterval(iv); },120); }
+  /* rights given on another laptop must be known before the tile is drawn */
+  var booted=false;
+  var boot=function(){ if(booted||!finCloudOn())return; booted=true; try{ finReady(function(){ setTimeout(function(){ try{ finTile(); }catch(e){} },400); }); }catch(e){} };
+  setTimeout(boot,4000); setTimeout(boot,9000); setTimeout(boot,16000);
+  var paint=function(){ try{ if(document.getElementById('lgPickList'))finTile(); }catch(e){} };
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',function(){ setTimeout(paint,300); }); else setTimeout(paint,300);
+  setTimeout(paint,1000); setTimeout(paint,2400); setInterval(paint,3000);
+})();
 })();
 
 </script>
