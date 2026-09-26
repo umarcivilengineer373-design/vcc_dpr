@@ -53330,7 +53330,7 @@ function cosDwtTab(body){
                    :E(r.work||''))+'</td>'+
           '<td>'+(ed?('<select data-w="proj">'+selOpts(cosProjects(),r.proj||'','— project —')+'</select>')
                    :E(r.proj||''))+'</td>'+
-          '<td>'+(ed?('<input data-w="by" list="cosPocL" value="'+E(r.by||'')+'" placeholder="who">')
+          '<td>'+(ed?('<select data-w="by">'+selOpts(COS.lists.poc,r.by||'','\u2014 who \u2014')+'<option value="__new">\u2795 New name\u2026</option></select>')
                    :E(r.by||''))+'</td>'+
           '<td>'+(ed?('<input type="date" data-w="tgt" value="'+E(r.tgt||'')+'" style="width:100%">')
                    :(r.tgt?E(dShort(r.tgt)):'\u2014'))+
@@ -53392,6 +53392,18 @@ function cosDwtTab(body){
     tr.querySelectorAll('[data-w]').forEach(function(el){
       el.addEventListener('change',function(){
         var r=rec(); if(!r)return;
+        /* Responsible: a name not on the list yet is typed once and joins the list */
+        if(el.dataset.w==='by'&&el.value==='__new'){
+          var ask=(typeof uiPrompt==='function')?uiPrompt('Name of the person responsible:',''):Promise.resolve(window.prompt('Name of the person responsible:',''));
+          Promise.resolve(ask).then(function(nm){
+            nm=String(nm==null?'':nm).trim();
+            var r2=rec(); if(!r2)return;
+            if(!nm){ el.value=r2.by||''; return; }
+            if(COS.lists.poc.indexOf(nm)<0){ COS.lists.poc.push(nm); cosListKeep('poc',nm); }
+            r2.by=nm; r2._u=nowMs(); COS._u=nowMs(); cosSave(); cosPaint();
+          });
+          return;
+        }
         r[el.dataset.w]=el.value; r._u=nowMs();
         cosSave();
         if(el.dataset.w==='status'||el.dataset.w==='prio')cosPaint();     /* the colour and the counters follow */
