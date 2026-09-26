@@ -14057,7 +14057,7 @@ The Vertical" required=""></textarea>
       <span class="spacer"></span>
       <button class="primary" id="siAdd" style="padding: 6px 14px;">+ Add Entry</button>
       <button class="ghost" id="siFromGrn" style="padding: 5px 12px; font-size: 0.78rem; border-color: rgb(31, 143, 78); color: rgb(31, 143, 78);" title="Bring every GRN receipt from Procurement into the store as Material In">⬇ Import from GRN</button>
-      <button class="ghost" id="siGrnRep" style="padding: 5px 12px; font-size: 0.78rem; border-color: rgb(183, 149, 42); color: rgb(138, 109, 26);" title="Empty Material In and bring every GRN receipt in again — the old entries are kept aside, so this can be undone">♻ Replace all from GRN</button>
+      <button class="ghost" id="siGrnRep" hidden style="display:none;padding: 5px 12px; font-size: 0.78rem; border-color: rgb(183, 149, 42); color: rgb(138, 109, 26);" title="Empty Material In and bring every GRN receipt in again — the old entries are kept aside, so this can be undone">♻ Replace all from GRN</button>
       <button class="ghost" id="siPrint" style="padding:5px 12px;font-size:.78rem">🖨 Print</button>
       <button class="ghost" id="siCsv" style="padding:5px 12px;font-size:.78rem">⬇ Export CSV</button>
       <span class="pill total" id="siPill">0</span>
@@ -15769,8 +15769,8 @@ window.__effBoot = function(){
   <div class="card" bis_skin_checked="1">
     <div class="card-h" bis_skin_checked="1"><h2>Procurement</h2><span class="hint">PR · PO · IGP · GRN · summary &amp; dashboard</span>
       <span class="spacer"></span>
-      <button class="primary admin-only" id="pcImport" style="padding: 5px 14px; font-size: 0.78rem; opacity: 0.5; cursor: not-allowed;" data-lkd="1" disabled="">⬆ Import Excel</button>
-      <button class="ghost admin-only" id="pcReplace" style="padding: 5px 12px; font-size: 0.78rem; border-color: rgb(183, 149, 42); color: rgb(138, 109, 26); opacity: 0.5; cursor: not-allowed;" title="Import an Excel that REPLACES everything held here — the old registers are kept aside, so this can be undone" data-lkd="1" disabled="">♻ Replace all (import)</button>
+      <button class="primary admin-only" id="pcImport" hidden style="display:none;padding: 5px 14px; font-size: 0.78rem; opacity: 0.5; cursor: not-allowed;" data-lkd="1" disabled="">⬆ Import Excel</button>
+      <button class="ghost admin-only" id="pcReplace" hidden style="display:none;padding: 5px 12px; font-size: 0.78rem; border-color: rgb(183, 149, 42); color: rgb(138, 109, 26); opacity: 0.5; cursor: not-allowed;" title="Import an Excel that REPLACES everything held here — the old registers are kept aside, so this can be undone" data-lkd="1" disabled="">♻ Replace all (import)</button>
       <button class="ghost admin-only" id="pcSave" style="padding: 5px 12px; font-size: 0.78rem; border-color: var(--good); color: var(--good); opacity: 0.5; cursor: not-allowed;" data-lkd="1" disabled="">💾 Save</button>
       <button class="ghost admin-only" id="pcSrcX" style="padding:5px 12px;font-size:.78rem;border-color:#1f8f4e;color:#1f8f4e" title="PR · PO · igp · GRN in the same format the sheet came in, plus the PR→PO→IGP→GRN chain">⬇ Export Excel</button>
       <button class="ghost admin-only" id="pcXlsx" style="padding:5px 12px;font-size:.78rem" title="The formatted procurement report (summary, dashboard figures, registers)">⬇ Report</button>
@@ -22128,6 +22128,8 @@ function stEntryModal(kind,id){
         return;
       }
     }
+    var dupL=rows.filter(function(r){ return stDupOf(kind,date,r,whoV,rec?rec.id:''); });
+    if(dupL.length&&dupL.length===rows.length){ toast('⛔ Already entered — '+dupL.map(function(r){ return r.name+' '+stQty(stNum(r.qty)); }).join(', ')+' on this date is in the register already. Nothing was entered twice.'); return; }
     if(rec){
       var r0=rows[0];
       stEnsureItem(r0.name,r0.unit);
@@ -22143,13 +22145,22 @@ function stEntryModal(kind,id){
     toast('✔ '+rows.length+' item'+(rows.length>1?'s':'')+' saved.');
   };
 }
+function stDupOf(kind,date,r,whoV,skipId){
+  try{
+    var st=storeState(), list=(kind==='in'?st.in:st.out)||[];
+    var nm=String(r.name||r.item||'').trim().toLowerCase(), q=stNum(r.qty), who=String(whoV||'').trim().toLowerCase();
+    return list.filter(function(x){ return x&&x.id!==skipId&&String(x.date||'')===String(date||'')&&String(x.item||'').trim().toLowerCase()===nm&&Math.abs(stNum(x.qty)-q)<0.0001&&String((kind==='in'?x.vendor:x.to)||'').trim().toLowerCase()===who; })[0]||null;
+  }catch(e){ return null; }
+}
 function stAddEntry(kind,date,r,whoV,remV,issV){
   var st=storeState();
+  if(stDupOf(kind,date,r,whoV)){ try{ toast('⛔ Already entered — '+String(r.name||'')+' '+stQty(stNum(r.qty))+' on this date is in Material '+(kind==='in'?'In':'Out')+' already, so it was not entered twice.'); }catch(e){} return false; }
   stEnsureItem(r.name,r.unit);
   var body={id:'se'+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36),
     date:date,item:String(r.name||'').trim(),unit:String(r.unit||'').trim(),qty:stNum(r.qty),remarks:remV,
     by:(currentUser?currentUser.name:''),desig:(currentUser?(currentUser.desig||''):''),at:Date.now()};
   if(kind==='in'){ body.vendor=whoV; st.in.push(body); } else { body.to=whoV||String(issV||''); st.out.push(body); }
+  return true;
 }
 
 /* ---- Material In from the procurement GRN register ------------------------------
@@ -22550,9 +22561,9 @@ function stImpPanel(){
       (on?(m==='replace'?'background:#b3392f;color:#fff;border-color:#b3392f':'background:var(--navy);color:#fff;border-color:var(--navy)'):'')+'">'+
       t+'<div style="font-size:.68rem;font-weight:600;opacity:.85">'+d+'</div></button>';
   };
+  ST_IMP.mode='add';                     /* only ever added to — a line already here is never taken twice */
   h+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:11px">'+
-      chip('add','&#10133; Add new only','keeps what is already in the register')+
-      chip('replace','&#9851; Replace all data','empties Material Out first, then loads this sheet')+
+      chip('add','&#10133; Add new only','keeps what is already in the register — the same line is never taken twice')+
     '</div>';
   if(ST_IMP.mode==='replace')
     h+='<div style="background:#fdf3e2;border:1px solid #e6c98a;border-left:5px solid #c98a1b;color:#8a6d1a;border-radius:9px;padding:9px 12px;font-size:.78rem;line-height:1.6;margin-bottom:11px">'+
@@ -32742,7 +32753,9 @@ function pcSheetKind(name,head){
   return '';
 }
 var PC_REPLACE=0;
-async function procImportFile(f,replaceAll){
+var PC_KIND_LABEL={prdr:'PR',po:'PO',igp:'IGP',grn:'GRN'};
+async function procImportFile(f,replaceAll,onlyKind){
+  onlyKind=(onlyKind&&PC_KIND_LABEL[onlyKind])?onlyKind:'';
   await loadXLSX();
   var buf=await f.arrayBuffer();
   var wb=XLSX.read(buf,{type:'array',cellDates:true});
@@ -32751,7 +32764,7 @@ async function procImportFile(f,replaceAll){
   if(replaceAll){
     rplSnap('proc',{prdr:(P.prdr||[]).slice(),po:(P.po||[]).slice(),igp:(P.igp||[]).slice(),grn:(P.grn||[]).slice()},
             'replaced by '+((f&&f.name)||'an Excel file'));
-    P.prdr=[]; P.po=[]; P.igp=[]; P.grn=[];
+    if(onlyKind)P[onlyKind]=[]; else { P.prdr=[]; P.po=[]; P.igp=[]; P.grn=[]; }
   }
   wb.SheetNames.forEach(function(sn){
     var aoa=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,defval:'',raw:false,dateNF:'yyyy-mm-dd'});
@@ -32762,6 +32775,7 @@ async function procImportFile(f,replaceAll){
     if(hr<0)return;
     var head=aoa[hr], kind=pcSheetKind(sn,head);
     if(!kind)return;
+    if(onlyKind&&kind!==onlyKind)return;               /* this button reads its own register's file only */
     var ix=pcHeadIndex(head), rows=[];
     /* every column of the source sheet is kept as-is in _raw, so an export can rebuild
        the very same sheet — including the columns this app does not use itself */
@@ -32909,7 +32923,7 @@ async function procImportFile(f,replaceAll){
     }
   });
   var tot=added.prdr+added.po+added.igp+added.grn;
-  if(!tot){ toast('⚠ No PR/DR, PO, IGP or GRN sheet found in that file.'); return; }
+  if(!tot){ toast(onlyKind?('⚠ No '+PC_KIND_LABEL[onlyKind]+' sheet found in that file — this button reads the '+PC_KIND_LABEL[onlyKind]+' file only.'):'⚠ No PR/DR, PO, IGP or GRN sheet found in that file.'); return; }
   /* a file may hold every site — keep only this project's rows here */
   P._foreign=0; procPruneForeign(P); P._pruned=1;
   ['prdr','po','igp','grn'].forEach(function(k){ added[k]=(P[k]||[]).length; });
@@ -35051,9 +35065,10 @@ function renderProc(){
     /* the search box is already on screen and may have the cursor in it — leave it alone */
     try{ pcDetPaintOut(_detKind); }catch(e){ $('pcBody').innerHTML=stamp+html; PC_DET_MOUNTED=_detKind; pcDetWire(_detKind); }
   }else{
-    $('pcBody').innerHTML=stamp+html;
+    $('pcBody').innerHTML=stamp+(window.pcImpBar?pcImpBar():'')+html;
     PC_DET_MOUNTED=_detKind;
     if(_detKind)pcDetWire(_detKind);
+    try{ if(window.pcImpWire)pcImpWire(); }catch(e){}
   }
   /* the Report sheet: the date box and the six outstanding pickers */
   try{ if(PC_VIEW==='rep')pcRepWire(); }catch(e){}
@@ -35153,13 +35168,37 @@ if($('pcSave'))$('pcSave').onclick=function(){
   renderProc();
   toast('💾 Procurement data saved — PR '+(P.prdr||[]).length+' · PO '+(P.po||[]).length+' · IGP '+(P.igp||[]).length+' · GRN '+(P.grn||[]).length+' rows.');
 };
+var PC_ONLY='';
 if($('pcFile'))$('pcFile').addEventListener('change',async function(e){
   var f=e.target.files[0]; e.target.value='';
-  var repl=PC_REPLACE; PC_REPLACE=0;               /* the flag is used once, even if the pick is cancelled */
+  var repl=PC_REPLACE, only=PC_ONLY; PC_REPLACE=0; PC_ONLY='';   /* the flags are used once, even if the pick is cancelled */
   if(!f)return;
   toast('Reading '+f.name+' …');
-  try{ await procImportFile(f,repl); }catch(err){ console.warn(err); toast('⚠ Could not read that file — please send the Excel export.'); }
+  try{ await procImportFile(f,repl,only); }catch(err){ console.warn(err); toast('⚠ Could not read that file — please send the Excel export.'); }
 });
+/* the import buttons inside the PR / PO / IGP / GRN registers — one file per register */
+window.pcImpBar=function(){
+  var k=PC_VIEW, L=PC_KIND_LABEL[k]; if(!L)return '';
+  return '<div class="admin-only no-print" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 10px">'+
+    '<button class="primary" data-pcimp="'+k+'" style="padding:6px 14px;font-size:.78rem">⬆ Import '+L+' file</button>'+
+
+    '<span style="font-size:.72rem;color:var(--muted)">the '+L+' export only — a line already here is never taken twice; changed lines are updated, new ones added</span></div>';
+};
+window.pcImpWire=function(){
+  var b=document.querySelector('#pcBody [data-pcimp]'), r=document.querySelector('#pcBody [data-pcrep]');
+  if(b)b.onclick=async function(){
+    if(typeof lkBlock==='function'&&lkBlock('proc'))return;
+    if(typeof requireEditPass==='function' && !(await requireEditPass('Enter password to import the '+PC_KIND_LABEL[b.dataset.pcimp]+' file:')))return;
+    PC_REPLACE=0; PC_ONLY=b.dataset.pcimp; $('pcFile').click();
+  };
+  if(r)r.onclick=async function(){
+    if(typeof lkBlock==='function'&&lkBlock('proc'))return;
+    var k=r.dataset.pcrep, P=procState();
+    if(!(await uiConfirm('Replace the whole '+PC_KIND_LABEL[k]+' register with a file? '+(P[k]||[]).length+' row(s) held now are taken out and the file loaded in their place. They are kept aside — one click undoes this.','Choose the file')))return;
+    if(typeof requireDelPass==='function' && !(await requireDelPass('Enter ADMIN password to replace the '+PC_KIND_LABEL[k]+' register:')))return;
+    PC_REPLACE=1; PC_ONLY=k; $('pcFile').click();
+  };
+};
 if($('pcClear'))$('pcClear').onclick=async function(){
   if(typeof requireDelPass==='function' && !(await requireDelPass('Enter ADMIN password to clear all procurement data:')))return;
   S.proc={prdr:[],po:[],igp:[],grn:[],at:0,by:''}; save(true); renderProc(); toast('Procurement data cleared.');
