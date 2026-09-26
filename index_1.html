@@ -15366,9 +15366,13 @@ window.__effBoot = function(){
       var R = n(req[d.id]), C = n(used[d.id]), I = 0, rec = 0;
       try{ I   = msIssued(d, '', day);   }catch(e){}
       try{ rec = msReceived(d, '', day); }catch(e){}
+      /* Received as per GRN — every GRN receipt of this material up to the date */
+      var grn = 0;
+      try{ var hitG = msMatcher(d); (typeof stGrnRows==='function'?stGrnRows():[]).forEach(function(g){
+        if(!hitG(g.item))return; if(day&&g.date&&String(g.date)>day)return; grn += stNum(g.qty); }); }catch(e){}
       return {
         d: d, name: d.name, unit: d.unit || '',
-        req: R, iss: I, con: C, rec: rec,
+        req: R, iss: I, con: C, rec: rec, grn: grn,
         gap: I - C,                       /* issued but not yet consumed */
         toIssue: R - I,                   /* still to issue against the BOQ */
         pIss: R ? (I / R * 100) : 0,
@@ -15427,8 +15431,8 @@ window.__effBoot = function(){
     }
 
     var T = list.reduce(function(a, r){
-      a.req += r.req; a.iss += r.iss; a.con += r.con; a.rec += r.rec; return a;
-    }, {req:0, iss:0, con:0, rec:0});
+      a.req += r.req; a.iss += r.iss; a.con += r.con; a.rec += r.rec; a.grn += (r.grn||0); return a;
+    }, {req:0, iss:0, con:0, rec:0, grn:0});
 
     var nShort = list.filter(function(r){ return r.gap < -0.005; }).length;
     var nOver  = list.filter(function(r){ return r.gap >  0.005; }).length;
@@ -15473,6 +15477,7 @@ window.__effBoot = function(){
         th('Material') +
         th('Unit','', 'center', 70) +
         th('Required','as per BOQ',            'right', 118) +
+        th('Received','as per GRN',            'right', 118) +
         th('Issued','from store',              'right', 118) +
         th('Consumed','as per progress',       'right', 118) +
         th('Issued − Consumed','at site / wastage', 'right', 130) +
@@ -15489,7 +15494,8 @@ window.__effBoot = function(){
           (r.rec ? '<div class="mq-small">received into store: '+q(r.rec)+'</div>' : '')+'</td>'+
         '<td style="text-align:center">'+esc(r.unit || '—')+'</td>'+
         cell(r.req, C_REQ, 1) +
-        cell(r.iss, C_ISS, 1) +
+        cell(r.grn||0, '#2e7d4f', 1) +
+        cell(r.iss, C_ISS, 1).replace('<td class="n"','<td class="n" data-mqiss="'+i+'" title="Click — the store lines behind this figure" style="cursor:pointer;text-decoration:underline dotted"').replace('style="cursor:pointer;text-decoration:underline dotted" style="','style="cursor:pointer;text-decoration:underline dotted;') +
         cell(r.con, C_CON, 1) +
         '<td class="n" style="color:'+gapCol+';font-weight:700">'+
           (Math.abs(r.gap)<0.000001 ? '—' : (r.gap>0?'+':'') + q(r.gap))+'</td>'+
@@ -15500,7 +15506,7 @@ window.__effBoot = function(){
     });
 
     h += '<tr class="mq-tot"><td colspan="3" style="text-align:right">TOTAL</td>'+
-      '<td class="n">'+q(T.req)+'</td><td class="n">'+q(T.iss)+'</td><td class="n">'+q(T.con)+'</td>'+
+      '<td class="n">'+q(T.req)+'</td><td class="n">'+q(T.grn||0)+'</td><td class="n">'+q(T.iss)+'</td><td class="n">'+q(T.con)+'</td>'+
       '<td class="n">'+((T.iss-T.con>0?'+':'')+q(T.iss-T.con))+'</td>'+
       '<td class="n">'+q(T.req-T.iss)+'</td><td colspan="3"></td></tr>';
 
@@ -15509,6 +15515,56 @@ window.__effBoot = function(){
       'the units are not all the same.</div>';
 
     box.innerHTML = h;
+    box.querySelectorAll('[data-mqiss]').forEach(function(td){ td.onclick=function(){ mqIssuedDetail(list[+td.dataset.mqiss]); }; });
+  }
+
+  /* every Material Out line this material is picking up — item by item, with duplicates flagged */
+  function mqIssuedDetail(r){
+    if(!r||!r.d)return;
+    var hit=msMatcher(r.d), day=asOf(), out=[];
+    (storeState().out||[]).forEach(function(x){
+      if(!hit(x.item))return;
+      var dt=String(x.date||''); if(day&&dt>day)return;
+      out.push(x);
+    });
+    /* the same issue line twice: same date · item · qty · issue serial (from the remarks) */
+    var keyOf=function(x){ return [String(x.date||''),String(x.item||'').trim().toLowerCase(),String(stNum(x.qty)),String(x.src||x.remarks||'')].join('|'); };
+    var cnt={}; out.forEach(function(x){ var k=keyOf(x); cnt[k]=(cnt[k]||0)+1; });
+    var dupIds=[], seenK={};
+    out.forEach(function(x){ var k=keyOf(x); if(cnt[k]>1){ if(seenK[k])dupIds.push(x.id); seenK[k]=1; } });
+    var byItem={}, order=[];
+    out.forEach(function(x){ var k=String(x.item||'').trim(); if(!byItem[k]){ byItem[k]={n:0,q:0}; order.push(k); } byItem[k].n++; byItem[k].q+=stNum(x.qty); });
+    order.sort(function(a,b){ return byItem[b].q-byItem[a].q; });
+    var tot=out.reduce(function(a,x){ return a+stNum(x.qty); },0);
+    var dupQ=out.filter(function(x){ return dupIds.indexOf(x.id)>=0; }).reduce(function(a,x){ return a+stNum(x.qty); },0);
+    var td='padding:5px 8px;border-bottom:1px solid var(--border);font-size:.8rem';
+    var h='<div style="font-size:.8rem;color:var(--muted);margin-bottom:8px">Issued <b>'+q(tot)+' '+esc(r.unit||'')+'</b> up to '+esc(fmtLong(day))+' — '+out.length+' Material Out line(s), across the store items this material matches.'+
+      (dupIds.length?('<div style="margin-top:6px;color:var(--bad);font-weight:700">⚠ '+dupIds.length+' line(s) appear twice — '+q(dupQ)+' '+esc(r.unit||'')+' counted double.</div>'):'')+'</div>'+
+      '<div style="font-weight:800;color:var(--navy);margin:8px 0 4px">Store items picked up as “'+esc(r.name)+'”</div>'+
+      '<table style="width:100%;border-collapse:collapse"><thead><tr style="background:#eef2f6"><th style="'+td+';text-align:left">Store item</th><th style="'+td+';text-align:right">Lines</th><th style="'+td+';text-align:right">Qty</th></tr></thead><tbody>'+
+      order.map(function(k){ return '<tr><td style="'+td+'">'+esc(k)+'</td><td style="'+td+';text-align:right">'+byItem[k].n+'</td><td style="'+td+';text-align:right;font-weight:700">'+q(byItem[k].q)+'</td></tr>'; }).join('')+
+      '</tbody></table>'+
+      '<div style="font-size:.74rem;color:var(--muted);margin:6px 0 12px">A store item that should not be here is matched because it carries every word of the material name — set the exact store item names against this material (its PR / store item mapping) to narrow it.</div>'+
+      '<div style="font-weight:800;color:var(--navy);margin:8px 0 4px">Every line</div>'+
+      '<div style="max-height:46vh;overflow:auto;border:1px solid var(--border);border-radius:8px"><table style="width:100%;border-collapse:collapse"><thead><tr style="background:#eef2f6;position:sticky;top:0"><th style="'+td+';text-align:left">Date</th><th style="'+td+';text-align:left">Store item</th><th style="'+td+';text-align:right">Qty</th><th style="'+td+';text-align:left">Issued to</th><th style="'+td+';text-align:left">Reference</th><th style="'+td+';text-align:left">From</th></tr></thead><tbody>'+
+      out.slice().sort(function(a,b){ return String(a.date||'').localeCompare(String(b.date||''))||String(a.item||'').localeCompare(String(b.item||'')); }).map(function(x){
+        var dup=dupIds.indexOf(x.id)>=0;
+        return '<tr'+(dup?' style="background:#fdecec"':'')+'><td style="'+td+'">'+esc(fmtShort?fmtShort(x.date):x.date)+'</td><td style="'+td+'">'+esc(x.item||'')+'</td><td style="'+td+';text-align:right;font-weight:700">'+q(stNum(x.qty))+'</td><td style="'+td+'">'+esc(x.to||x.subSeg||'')+'</td><td style="'+td+'">'+esc(x.remarks||'')+(dup?' <b style="color:var(--bad)">duplicate</b>':'')+'</td><td style="'+td+'">'+esc(x.from||(x.src?'ERP sheet':'typed'))+'</td></tr>'; }).join('')+
+      '</tbody></table></div>';
+    var ov=mrOverlay('mqIssOv','⬆ Issued from store — '+r.name,h,
+      '<button class="ghost" id="mqIssX">Close</button>'+(dupIds.length?'<button class="primary" id="mqIssFix" style="margin-left:8px">🧹 Remove the '+dupIds.length+' duplicate line(s)</button>':''),1100);
+    ov.querySelector('#mqIssX').onclick=function(){ ov.remove(); };
+    var fx=ov.querySelector('#mqIssFix');
+    if(fx)fx.onclick=async function(){
+      if(typeof requireDelPass==='function'&&!(await requireDelPass('Enter ADMIN password to remove the duplicate Material Out lines:')))return;
+      var st=storeState();
+      try{ rplSnap('store.out',(st.out||[]).slice(),'duplicate issue lines removed'); }catch(e){}
+      st.out=(st.out||[]).filter(function(x){ return dupIds.indexOf(x.id)<0; });
+      save(true); ov.remove();
+      try{ renderStoreOut(); }catch(e){}
+      try{ paint(); }catch(e){}
+      toast('🧹 '+dupIds.length+' duplicate line(s) removed — '+q(dupQ)+' '+(r.unit||'')+' taken off Issued. The old list is kept aside.');
+    };
   }
 
   /* A picker of our own, so the Store sheets keep their own selections. */
@@ -15543,8 +15599,8 @@ window.__effBoot = function(){
     var list = filtered();
     if(!list.length){ toast('Nothing to print for the current filters.'); return; }
     var td = 'border:1px solid #c4cdd6;padding:5px 7px;font-size:.74rem';
-    var T = list.reduce(function(a,r){ a.req+=r.req; a.iss+=r.iss; a.con+=r.con; return a; }, {req:0,iss:0,con:0});
-    var head = ['#','Material','Unit','Required (BOQ)','Issued (Store)','Consumed (Progress)',
+    var T = list.reduce(function(a,r){ a.req+=r.req; a.iss+=r.iss; a.con+=r.con; a.grn+=(r.grn||0); return a; }, {req:0,iss:0,con:0,grn:0});
+    var head = ['#','Material','Unit','Required (BOQ)','Received (GRN)','Issued (Store)','Consumed (Progress)',
                 'Issued − Consumed','Still to Issue','% Issued','% Consumed'];
     var h = '<div style="text-align:center;font-weight:800;font-size:1.08rem;margin-bottom:4px">'+
         'MATERIAL REQUIRED vs ISSUED vs CONSUMED</div>'+
@@ -15558,6 +15614,7 @@ window.__effBoot = function(){
           '<td style="'+td+'">'+esc(r.name)+'</td>'+
           '<td style="'+td+';text-align:center">'+esc(r.unit||'')+'</td>'+
           '<td style="'+td+';text-align:right">'+q(r.req)+'</td>'+
+          '<td style="'+td+';text-align:right">'+q(r.grn||0)+'</td>'+
           '<td style="'+td+';text-align:right">'+q(r.iss)+'</td>'+
           '<td style="'+td+';text-align:right">'+q(r.con)+'</td>'+
           '<td style="'+td+';text-align:right">'+((r.gap>0?'+':'')+q(r.gap))+'</td>'+
@@ -15567,6 +15624,7 @@ window.__effBoot = function(){
       }).join('')+
       '<tr style="background:#f2f5f8;font-weight:800"><td style="'+td+'" colspan="3">TOTAL</td>'+
         '<td style="'+td+';text-align:right">'+q(T.req)+'</td>'+
+        '<td style="'+td+';text-align:right">'+q(T.grn||0)+'</td>'+
         '<td style="'+td+';text-align:right">'+q(T.iss)+'</td>'+
         '<td style="'+td+';text-align:right">'+q(T.con)+'</td>'+
         '<td style="'+td+';text-align:right">'+((T.iss-T.con>0?'+':'')+q(T.iss-T.con))+'</td>'+
@@ -15585,11 +15643,11 @@ window.__effBoot = function(){
     var list = filtered();
     if(!list.length){ toast('Nothing to export for the current filters.'); return; }
     stCsvDownload('material-required-vs-issued-vs-consumed-'+asOf()+'.csv',
-      ['S.No','Material','Unit','Required (BOQ)','Issued (Store)','Consumed (Progress)',
+      ['S.No','Material','Unit','Required (BOQ)','Received (GRN)','Issued (Store)','Consumed (Progress)',
        'Issued minus Consumed','Still to Issue','% Issued','% Consumed','Received into Store'],
       list.map(function(r,i){
         return [i+1, r.name, r.unit,
-                r.req.toFixed(2), r.iss.toFixed(2), r.con.toFixed(2),
+                r.req.toFixed(2), (r.grn||0).toFixed(2), r.iss.toFixed(2), r.con.toFixed(2),
                 r.gap.toFixed(2), r.toIssue.toFixed(2),
                 r.req ? r.pIss.toFixed(1) : '', r.req ? r.pCon.toFixed(1) : '',
                 r.rec.toFixed(2)];
@@ -22283,9 +22341,12 @@ async function stImportGrn(replaceAll){
     rplSnap('store.in',(st.in||[]).slice(),'replaced from GRN');
     st.in=[];
   }
-  var have={};
-  (st.in||[]).forEach(function(r){ if(r&&r.grnKey)have[r.grnKey]=1; });
-  var fresh=rows.filter(function(r){ return !have[r.key]; });
+  var have={}, loose={};
+  (st.in||[]).forEach(function(r){ if(!r)return; if(r.grnKey)have[r.grnKey]=1;
+    loose[[String(r.date||''),String(r.item||'').trim().toLowerCase(),String(stNum(r.qty))].join('|')]=1; });
+  var fresh=rows.filter(function(r){ if(have[r.key])return false;
+    var l=[String(r.date||''),String(r.item||'').trim().toLowerCase(),String(stNum(r.qty))].join('|');
+    return replaceAll||!loose[l]; });
   if(!fresh.length){ toast('Already up to date — all '+rows.length+' GRN receipt(s) are in the store.'); return; }
   if(replaceAll){
     var who2=(typeof currentUser!=='undefined'&&currentUser)?(currentUser.name||''):'', nw=Date.now();
@@ -32820,7 +32881,31 @@ async function procImportFile(f,replaceAll){
         if(seen[k])return; seen[k]=1; clean.push(r);
       });
       if(clean.length<rows.length)console.info('procurement import: '+(rows.length-clean.length)+' duplicate '+kind+' row(s) skipped');
-      P[kind]=clean; added[kind]=clean.length;
+      /* a document line is the same line when its own numbers match — the register is
+         joined with the sheet, not replaced by it, so a partial export (this month only)
+         never wipes the earlier months and a second import of the same file changes nothing */
+      var idOf=function(r){
+        var k=function(v){ return pcKey(v); };
+        if(kind==='prdr')return ['pr',k(r.type),k(r.pr),k(r.year),k(r.sno),k(r.item),k(r.proj)].join('|');
+        if(kind==='po')  return ['po',k(r.po),k(r.year),k(r.sno),k(r.item),k(r.proj)].join('|');
+        if(kind==='igp') return ['igp',k(r.igp),k(r.year),k(r.poSno),k(r.item),k(r.po),k(r.proj)].join('|');
+        return ['grn',k(r.grn),k(r.year),k(r.igp),k(r.item),k(r.proj)].join('|');
+      };
+      if(replaceAll||!(P[kind]||[]).length){ P[kind]=clean; added[kind]=clean.length; }
+      else{
+        var cur=P[kind].slice(), at={}, dupIn={}, nNew=0, nUpd=0, out=[];
+        cur.forEach(function(r,i){ var id=idOf(r); if(at[id]==null)at[id]=i; });
+        clean.forEach(function(r){
+          var id=idOf(r);
+          if(dupIn[id])return; dupIn[id]=1;                 /* the sheet itself repeats a line */
+          if(at[id]!=null){ var o=cur[at[id]]; var same=false; try{ same=JSON.stringify(o._raw||{})===JSON.stringify(r._raw||{}); }catch(e){}
+            if(!same){ cur[at[id]]=r; nUpd++; } }
+          else { out.push(r); nNew++; }
+        });
+        P[kind]=cur.concat(out); added[kind]=P[kind].length;
+        added['_new_'+kind]=nNew; added['_upd_'+kind]=nUpd;
+        console.info('procurement import '+kind+': '+nNew+' new · '+nUpd+' updated · '+(clean.length-nNew-nUpd)+' already there');
+      }
     }
   });
   var tot=added.prdr+added.po+added.igp+added.grn;
@@ -32830,7 +32915,10 @@ async function procImportFile(f,replaceAll){
   ['prdr','po','igp','grn'].forEach(function(k){ added[k]=(P[k]||[]).length; });
   P.at=Date.now(); P.by=(currentUser?currentUser.name:'');
   save(true); renderProc();
+  var nn=(added._new_prdr||0)+(added._new_po||0)+(added._new_igp||0)+(added._new_grn||0);
+  var nu=(added._upd_prdr||0)+(added._upd_po||0)+(added._upd_igp||0)+(added._upd_grn||0);
   toast('✅ Imported — PR '+added.prdr+' · PO '+added.po+' · IGP '+added.igp+' · GRN '+added.grn+' rows'+
+        ((!replaceAll&&(nn||nu||true))?(' · '+nn+' new, '+nu+' updated, the rest were already there'):'')+
         (P._foreign?(' · '+P._foreign+' row(s) of another project kept aside'):'')+'.');
   /* send the new register up straight away — otherwise the old copy in the database
      is still there when this page is opened again */
@@ -58288,6 +58376,79 @@ function finTile(){
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',function(){ setTimeout(paint,300); }); else setTimeout(paint,300);
   setTimeout(paint,1000); setTimeout(paint,2400); setInterval(paint,3000);
 })();
+})();
+
+</script>
+<script id="dupMod">
+/* ==================================================================
+   ONE LINE, ONCE — the registers that are imported from ERP sheets used to
+   take the same line again on every import. The importers no longer do that;
+   this sweeps out what the earlier imports left behind, in the Procurement
+   registers (PR / PO / IGP / GRN) and in the store's Material In / Out, and
+   sends the cleaned copy to the database so it does not come back.
+   ================================================================== */
+(function(){
+'use strict';
+function N(v){ try{ if(typeof stNum==='function')return stNum(v); }catch(e){} var n=parseFloat(String(v==null?'':v).replace(/,/g,'')); return isNaN(n)?0:n; }
+function K(v){ try{ if(typeof pcKey==='function')return pcKey(v); }catch(e){} return String(v==null?'':v).trim().toLowerCase().replace(/\s+/g,' '); }
+function procKey(kind,r){
+  var base;
+  if(kind==='prdr')     base=['pr',K(r.type),K(r.pr),K(r.year),K(r.sno),K(r.item),K(r.proj),K(r.prDate)];
+  else if(kind==='po')  base=['po',K(r.po),K(r.year),K(r.sno),K(r.item),K(r.proj),K(r.poDate)];
+  else if(kind==='igp') base=['igp',K(r.igp),K(r.year),K(r.poSno),K(r.item),K(r.po),K(r.proj),K(r.igpDate)];
+  else                  base=['grn',K(r.grn),K(r.year),K(r.igp),K(r.item),K(r.proj),K(r.grnDate),K(r.wh)];
+  /* the figures must match too — two real lines of the same item on one document differ somewhere */
+  return base.concat([N(r.qty),N(r.rate),N(r.value),N(r.total),N(r.ordQty)]).join('|');
+}
+function dedupe(arr,keyOf){
+  var seen={}, out=[];
+  arr.forEach(function(r){ if(!r){ return; } var k=keyOf(r); if(k==null){ out.push(r); return; } if(seen[k])return; seen[k]=1; out.push(r); });
+  return out;
+}
+function run(quiet){
+  if(typeof S==='undefined'||!S)return 0;
+  try{ if(typeof roBlock==='function'&&roBlock())return 0; }catch(e){}
+  var gone=[], total=0;
+  /* Procurement */
+  try{
+    var P=S.proc;
+    if(P&&typeof P==='object'){
+      ['prdr','po','igp','grn'].forEach(function(k){
+        var arr=P[k]; if(!Array.isArray(arr)||arr.length<2)return;
+        var out=dedupe(arr,function(r){ return procKey(k,r); });
+        if(out.length<arr.length){ var n=arr.length-out.length; total+=n; gone.push({prdr:'PR',po:'PO',igp:'IGP',grn:'GRN'}[k]+' '+n); P[k]=out; P.at=Date.now(); }
+      });
+    }
+  }catch(e){ console.warn('dedupe proc',e); }
+  /* Store — Material Out (ERP-stamped lines) and Material In (GRN-stamped lines) */
+  try{
+    var st=(typeof storeState==='function')?storeState():S.store;
+    if(st&&typeof st==='object'){
+      if(Array.isArray(st.out)&&st.out.length>1){
+        var o2=dedupe(st.out,function(r){ return r.src?('src:'+r.src):null; });
+        if(o2.length<st.out.length){ var n1=st.out.length-o2.length; total+=n1; gone.push('Material Out '+n1);
+          try{ rplSnap('store.out',st.out.slice(),'duplicate issue lines removed'); }catch(e){} st.out=o2; }
+      }
+      if(Array.isArray(st.in)&&st.in.length>1){
+        var i2=dedupe(st.in,function(r){ return r.grnKey?('grn:'+r.grnKey):null; });
+        if(i2.length<st.in.length){ var n2=st.in.length-i2.length; total+=n2; gone.push('Material In '+n2);
+          try{ rplSnap('store.in',st.in.slice(),'duplicate GRN receipts removed'); }catch(e){} st.in=i2; }
+      }
+    }
+  }catch(e){ console.warn('dedupe store',e); }
+  if(!total)return 0;
+  try{ save(true); }catch(e){}
+  try{ if(window.cloudPushExtras)window.cloudPushExtras(); }catch(e){}
+  ['renderProc','renderStoreOut','renderStoreIn','renderStGRN'].forEach(function(f){ try{ if(typeof window[f]==='function'&&document.getElementById('tab-'+f.replace('render','').toLowerCase()))window[f](); }catch(e){} });
+  if(!quiet){ try{ toast('🧹 '+total+' duplicate line(s) removed — '+gone.join(' · ')+'. The old lists are kept aside.'); }catch(e){} }
+  console.info('dedupe: '+gone.join(', '));
+  return total;
+}
+/* after the first database pull, and then now and again — a merge from the database
+   could bring an old copy's duplicates back until the cleaned copy has gone up */
+setTimeout(function(){ run(false); },12000);
+setInterval(function(){ run(true); },90000);
+window.dedupRegisters=function(){ return run(false); };
 })();
 
 </script>
