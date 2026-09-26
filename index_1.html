@@ -50742,12 +50742,28 @@ function selOpts(list,cur,blank){
 }
 
 /* ================= the shell ================= */
+function cosAutoPull(){
+  if(!document.getElementById('cosOv')){ try{ clearInterval(window.__cosPullIv); }catch(e){} return; }
+  try{ if(typeof cloudOn==='function'&&!cloudOn())return; }catch(e){}
+  cosPull().then(function(r){
+    if(!(r&&r.ok&&r.n))return;
+    /* never redraw under someone's fingers — the next tick will */
+    var a=document.activeElement;
+    if(a&&/INPUT|TEXTAREA|SELECT/.test(a.tagName)&&a.closest('#cosOv'))return;
+    try{ cosPaint(); }catch(e){}
+  }).catch(function(){});
+}
 function cosOpen(){
   /* even if the tile were reached some other way, only an Admin gets in */
   try{ if(typeof cosTileAllowed==='function'&&!cosTileAllowed()){
     T('\uD83D\uDD12 COS Data is open to Admins only.'); return; } }catch(e){}
   cosCss();
   cosReady(function(){
+    /* every opening reads the database again, and then every 3 minutes while it
+       stays open — so what another computer posted shows up here by itself */
+    setTimeout(cosAutoPull,800);
+    try{ clearInterval(window.__cosPullIv); }catch(e){}
+    window.__cosPullIv=setInterval(cosAutoPull,180000);
     var ov=document.getElementById('cosOv'); if(ov)ov.remove();
     ov=document.createElement('div'); ov.id='cosOv';
     ov.innerHTML=
@@ -50931,7 +50947,9 @@ function cosNeedEdit(){ if(cosCanEdit())return true; T('Your COS account is view
 /* ================= TASKS =================
    The COS Diary sheet: S.No · Date · Project · Detail of Work / Activity ·
    Location · POC / Responsible · Target Date · Priority · Updates · Status  */
-var TF={q:'',proj:'',poc:'',stat:'',prio:'',from:'',to:'',src:''};
+var TF={q:'',proj:'',poc:'',stat:'',prio:'',from:'',to:'',src:'',dby:'date'};
+/* From / To work on the entry date, or on the target date — the user's choice */
+function tfDateOf(r){ return String((TF.dby==='target'?r.target:r.date)||''); }
 
 function taskDue(t){
   if(!t.target)return '';
@@ -50950,8 +50968,8 @@ function taskRows(){
     else if(TF.stat==='__late'){ if(taskDue(t)!=='Overdue')return false; }
     else if(TF.stat&&t.status!==TF.stat)return false;
     if(TF.prio&&t.priority!==TF.prio)return false;
-    if(TF.from&&String(t.date||'')<TF.from)return false;
-    if(TF.to&&String(t.date||'')>TF.to)return false;
+    if(TF.from&&tfDateOf(t)<TF.from)return false;
+    if(TF.to&&tfDateOf(t)>TF.to)return false;
     if(q){
       var hay=[t.detail,t.project,t.location,t.poc,t.remarks,(t.updates||[]).map(function(u){return u.t}).join(' ')].join(' ').toLowerCase();
       if(hay.indexOf(q)<0)return false;
@@ -50973,8 +50991,8 @@ function taskFilterOk(r){
   else if(TF.stat==='__late'){ if(r.flag!=='Overdue')return false; }
   else if(TF.stat&&r.status!==TF.stat)return false;
   if(TF.prio&&r.priority!==TF.prio)return false;
-  if(TF.from&&String(r.date||'')<TF.from)return false;
-  if(TF.to&&String(r.date||'')>TF.to)return false;
+  if(TF.from&&tfDateOf(r)<TF.from)return false;
+  if(TF.to&&tfDateOf(r)>TF.to)return false;
   if(q&&[r.detail,r.sub,r.project,r.location,r.poc,r.ref,r.note].join(' ').toLowerCase().indexOf(q)<0)return false;
   return true;
 }
@@ -51022,15 +51040,16 @@ function taskAll(){
       detail:r.work||'',sub:r.note||'',location:'',poc:r.by||'',
       target:r.tgt||r.d||'',targetTxt:'',priority:r.prio||'Normal',status:st,
       flag:dueFlag(r.tgt||r.d,st),lu:null,nUpd:0,
-      ref:(r.raised&&r.raised!==r.d)?('raised '+dShort(r.raised)):'',raw:r});
+      ref:(r.raised&&r.raised!==r.d)?('raised '+dShort(r.raised)):'',ord:num(r.ord),ts:num(r._u),raw:r});
   });
   return out;
 }
 function taskAllRows(){
   return taskAll().filter(taskFilterOk).sort(function(a,b){
+    /* newest day first; inside a day the latest-added line comes first */
     return String(b.date||'').localeCompare(String(a.date||''))||
            String(a.src).localeCompare(String(b.src))||
-           (num(b.sno)-num(a.sno));
+           (num(b.sno)-num(a.sno))||(num(b.ord)-num(a.ord))||(num(b.ts)-num(a.ts));
   });
 }
 function lastUpd(t){
@@ -51085,6 +51104,7 @@ function cosTaskTab(body){
           '<option value="__late"'+(TF.stat==='__late'?' selected':'')+'>Overdue</option>'+
           selOpts(COS_STATUS,TF.stat)+'</select></div>'+
         '<div><label class="fl">Priority</label><select id="tfR">'+selOpts(COS_PRIOR,TF.prio,'Any')+'</select></div>'+
+        '<div><label class="fl">Date by</label><select id="tfDby"><option value="date"'+(TF.dby!=='target'?' selected':'')+'>Entry date</option><option value="target"'+(TF.dby==='target'?' selected':'')+'>Target date</option></select></div>'+
         '<div><label class="fl">From</label><input type="date" id="tfF" value="'+E(TF.from)+'"></div>'+
         '<div><label class="fl">To</label><input type="date" id="tfT" value="'+E(TF.to)+'"></div>'+
       '</div>'+
@@ -51128,7 +51148,7 @@ function cosTaskTab(body){
   var bind=function(id,key,ev){ var el=B(id); if(!el)return;
     el.addEventListener(ev||'change',function(){ TF[key]=el.value; cosPaint(); }); };
   bind('#tfP','proj'); bind('#tfC','poc'); bind('#tfS','stat'); bind('#tfR','prio'); bind('#tfSrc','src');
-  bind('#tfF','from'); bind('#tfT','to');
+  bind('#tfF','from'); bind('#tfT','to'); bind('#tfDby','dby');
   var q=B('#tfQ');
   if(q){ var qt=null; q.addEventListener('input',function(){ clearTimeout(qt); qt=setTimeout(function(){
     TF.q=q.value; cosPaint(); var n=document.querySelector('#tfQ'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } },260); }); }
@@ -56641,7 +56661,7 @@ window.bqExportBoq=bqExport;
    The Daily Progress Sheet and the Concrete (Ready Mix) record are the
    two sheets every other figure in the application is worked out from.
    So: the controls that change them are on the screen for an Admin
-   only, and every one of them asks for the MASTER password first —
+   only, and every one of them asks for the ADMIN password first (Import Excel alone keeps the master password) —
    every time, nothing is remembered between clicks.
    ================================================================== */
 (function(){
@@ -56663,17 +56683,28 @@ function lkAdmin(){
   return false;
 }
 
+/* the ADMIN password: what Master Settings ▸ Passwords holds for user edit
+   (factory 03239006200), or the personal password of any admin account.
+   The master password (Import Excel) is accepted too, so nobody is locked out. */
+function lkAdminPassOk(p){
+  p=String(p||'').trim(); if(!p)return false;
+  try{ if(typeof userEditPass==='function'&&p===String(userEditPass()||'').trim())return true; }catch(e){}
+  try{ if(p===String(window.EDIT_MASTER_PASS||'03239006200'))return true; }catch(e){}
+  var h=''; try{ h=hashPin(p); }catch(e){ return false; }
+  try{ if((S&&S.users||[]).some(function(u){ return u&&u.role==='admin'&&u.pass===h; }))return true; }catch(e){}
+  try{ if(((mrLoad()||{}).users||[]).some(function(u){ return u&&u.role==='admin'&&u.pass===h; }))return true; }catch(e){}
+  return h===LK_MASTER||h===lkMasterHash();
+}
 /* asked afresh on every single action — nothing is cached */
 async function lkAsk(what){
   try{ if(typeof roBlock==='function'&&roBlock())return false; }catch(e){}
   if(!lkAdmin()){ T('🔒 This is open to Admins only.'); return false; }
   var p=null;
-  try{ p=await pinDialog('🔐 MASTER password — '+what+':',false); }
+  try{ p=await pinDialog('🔐 ADMIN password — '+what+':',false); }
   catch(e){ return false; }
   if(p===null)return false;
-  var h=''; try{ h=hashPin(String(p).trim()); }catch(e){ return false; }
-  if(h===LK_MASTER||h===lkMasterHash())return true;
-  T('❌ Wrong master password — nothing was changed.');
+  if(lkAdminPassOk(p))return true;
+  T('❌ Wrong admin password — nothing was changed.');
   return false;
 }
 
@@ -56725,7 +56756,7 @@ function lkGuard(spec){
     return false;
   };
   if(!/🔐/.test(b.title||''))
-    b.title=(b.title?b.title+' — ':'')+'🔐 master password needed';
+    b.title=(b.title?b.title+' — ':'')+'🔐 admin password needed';
 }
 
 /* Admin only on the screen. A class is not used, so this stays independent
@@ -57238,11 +57269,25 @@ function finLogoHTML(){
   var src=finLogoSrc();
   return src?('<span class="cos-logo"><img alt="The Vertical" src="'+src+'"></span>'):'<span class="cos-mark">💵</span>';
 }
+/* every opening reads the database again, and then every 3 minutes while open */
+function finAutoPull(){
+  if(!document.getElementById('finOv')){ try{ clearInterval(window.__finPullIv); }catch(e){} return; }
+  try{ if(typeof cloudOn==='function'&&!cloudOn())return; }catch(e){}
+  finPull().then(function(r){
+    if(!(r&&r.ok&&r.n))return;
+    var a=document.activeElement;
+    if(a&&/INPUT|TEXTAREA|SELECT/.test(a.tagName)&&a.closest('#finOv'))return;
+    try{ finPaint(); }catch(e){}
+  }).catch(function(){});
+}
 function finOpen(){
   if(!finAllowed()){ T('🔒 Finance is not open to this account — an Admin gives access in Finance → Settings.'); return; }
   if(!K()){ T('Finance could not start — the COS module is missing.'); return; }
   finCss();
   finReady(function(){
+    setTimeout(finAutoPull,800);
+    try{ clearInterval(window.__finPullIv); }catch(e){}
+    window.__finPullIv=setInterval(finAutoPull,180000);
     var ov=document.getElementById('finOv'); if(ov)ov.remove();
     ov=document.createElement('div'); ov.id='finOv';
     ov.innerHTML=
