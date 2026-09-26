@@ -5996,12 +5996,13 @@ input.bd-drop{appearance:none;-webkit-appearance:none;cursor:text;padding-right:
       <table class="grid" id="progTable">
         <thead><tr>
           <th style="width:42px">S.No</th><th style="min-width:220px">Item Description</th><th style="min-width:120px">Floor</th>
+          <th style="min-width:130px">Sub Contractor / Vendor</th><th style="width:90px">WO #</th>
           <th style="width:80px">BOQ - Qty</th><th style="width:70px">Unit</th>
           <th style="width:58px">No</th><th style="width:68px">Length</th><th style="width:68px">Breadth</th><th style="width:68px">Height</th>
           <th style="width:26px;text-align:center">=</th><th style="width:84px">Quantity</th>
           <th style="width:115px">Cumulative</th><th style="width:100px">%</th>
         </tr></thead>
-        <tbody><tr><td colspan="13" style="color:var(--faint);padding:10px;font-size:.83rem">No quantities recorded on Wed, 23 Sept 2026 — click <b>+ New</b> to open the entry form.</td></tr></tbody>
+        <tbody><tr><td colspan="15" style="color:var(--faint);padding:10px;font-size:.83rem">No quantities recorded on Wed, 23 Sept 2026 — click <b>+ New</b> to open the entry form.</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -16247,6 +16248,14 @@ window.__effBoot = function(){
 
 
 <!-- Add Progress: full-size sheet entry form -->
+<style>
+#pmTable{width:100%;table-layout:auto}
+#pmTable th{white-space:nowrap;font-size:.7rem;padding:6px 5px}
+#pmTable td{padding:3px 4px}
+#pmTable select,#pmTable input{width:100%;min-width:0;box-sizing:border-box;font-size:.78rem;padding:5px 4px}
+#pmTable td:nth-child(n+9) input{max-width:70px}
+#progModal .modal-b .tblwrap{overflow-x:auto}
+</style>
 <div class="overlay" id="progModal" bis_skin_checked="1">
   <div class="modal modal-full" bis_skin_checked="1">
     <div class="modal-h" bis_skin_checked="1">➕ Daily Progress Entry Form
@@ -16256,8 +16265,9 @@ window.__effBoot = function(){
       <div class="tblwrap" bis_skin_checked="1">
         <table class="grid" id="pmTable">
           <thead><tr>
-            <th style="min-width:24px">#</th><th style="min-width:186px">WBS Group / BOQ Name</th><th style="min-width:183px">Sub Segment</th><th style="min-width:402px">Item Description</th><th style="min-width:297px">Floor</th>
-            <th style="min-width:52px">Unit</th>
+            <th style="min-width:24px">#</th><th style="min-width:140px">WBS Group / BOQ Name</th><th style="min-width:120px">Sub Segment</th><th style="min-width:230px">Item Description</th><th style="min-width:150px">Floor</th>
+            <th style="min-width:140px">Sub Contractor / Vendor</th><th style="min-width:110px">Work Order #</th>
+            <th style="min-width:44px">Unit</th>
             <th style="min-width:40px">No</th><th style="min-width:58px">Length</th><th style="min-width:52px">Breadth</th><th style="min-width:50px">Height</th>
             <th style="min-width:12px;text-align:center">=</th><th style="min-width:76px">Qty</th>
             <th style="min-width:80px">Cum.</th><th style="min-width:30px">%</th><th style="min-width:22px"></th>
@@ -26946,19 +26956,26 @@ function renderPmTable(){
     };
     const buildFloorOpts=list=>`<option value=""${!p.floor?' selected':''}>— select floor —</option>`+list.map(f=>`<option value="${esc(f)}"${f===p.floor?' selected':''}>${esc(f)}</option>`).join('');
     const fOpts=buildFloorOpts(floorChoices());
+    /* the vendor and its work orders come from the Work Orders / Contracts sheet (and the vendor list) */
+    const vendorOpts=()=>{ const cur=String(p.vendor||'').trim(); const list=pgVendorList(); if(cur&&list.indexOf(cur)<0)list.push(cur);
+      return `<option value=""${!cur?' selected':''}>— vendor —</option>`+list.map(v=>`<option value="${esc(v)}"${v===cur?' selected':''}>${esc(v)}</option>`).join(''); };
+    const woOpts=()=>{ const cur=String(p.wo||'').trim(); const list=pgWoList(p.vendor); if(cur&&!list.some(w=>w.serial===cur))list.push({serial:cur,title:''});
+      return `<option value=""${!cur?' selected':''}>— WO # —</option>`+list.map(w=>`<option value="${esc(w.serial)}"${w.serial===cur?' selected':''}>${esc(w.serial+(w.title?(' — '+w.title.slice(0,40)):''))}</option>`).join(''); };
     const tr=document.createElement('tr');
     tr.innerHTML=`<td class="dim" style="text-align:center">${i+1}</td>
       <td><select class="gsel"${hasG?'':' disabled'}>${gOpts}</select></td>
       <td><select class="ssel"${(hasS&&subList.length)?'':' disabled'}>${sOpts}</select></td>
       <td><select class="isel">${iOpts}</select></td>
       <td><select class="fsel" title="Floors used by the WBS Group / BOQ Name selected in column 2 of this row (from Setup \u2192 BOQ, Floor / Section column)">${fOpts}</select></td>
+      <td><select class="vsel" title="Sub contractor / vendor who did this work — from the Work Orders sheet">${vendorOpts()}</select></td>
+      <td><select class="wsel" title="The work order this measurement is against">${woOpts()}</select></td>
       <td class="ro pUnit" style="text-align:center"></td>
       <td><input type="number" step="any" value="${p.no??''}" placeholder="–"></td>
       <td><input type="number" step="any" value="${p.len??''}" placeholder="–"></td>
       <td><input type="number" step="any" value="${p.br??''}" placeholder="–"></td>
       <td><input type="number" step="any" value="${p.ht??''}" placeholder="–"></td>
       <td class="dim" style="text-align:center">=</td>
-      <td><input type="number" step="any" value="${p.qty||''}" style="font-weight:700"></td>
+      <td><input type="number" step="any" value="${p.qty||''}" readonly tabindex="-1" title="Worked out from No × Length × Breadth × Height" style="font-weight:700;background:#f2f5f8;color:var(--navy);cursor:not-allowed"></td>
       <td class="dim pCum"></td>
       <td><div class="meter"><i></i></div><div class="dim pPct" style="font-size:.72rem"></div></td>
       <td style="text-align:center"><button class="xbtn">✕</button></td>`;
@@ -26966,6 +26983,10 @@ function renderPmTable(){
     const ssel=tr.querySelector('.ssel');
     const sel=tr.querySelector('.isel');
     const fsel=tr.querySelector('.fsel');
+    const vsel=tr.querySelector('.vsel'), wsel=tr.querySelector('.wsel');
+    vsel.addEventListener('change',e=>{ p.vendor=e.target.value; if(p.wo&&!pgWoList(p.vendor).some(w=>w.serial===p.wo))p.wo=''; wsel.innerHTML=woOpts(); });
+    wsel.addEventListener('change',e=>{ p.wo=e.target.value;
+      if(p.wo&&!p.vendor){ const w=pgWoList('').find(x=>x.serial===p.wo); if(w&&w.vendor){ p.vendor=w.vendor; vsel.innerHTML=vendorOpts(); wsel.innerHTML=woOpts(); } } });
     const [inNo,inL,inB,inH,inQ]=tr.querySelectorAll('input');
     const rebuildItems=()=>{
       const list=itemsInScope(p.group,p.sub);
@@ -27033,7 +27054,9 @@ function renderPmTable(){
       const a=autoQty(p); if(a!=null){p.qty=+a.toFixed(3);inQ.value=p.qty}
       upd();
     }));
-    inQ.addEventListener('input',e=>{p.qty=num(e.target.value)||0;upd()});
+    /* Qty follows the dimensions only — a keyed value is put back */
+    inQ.addEventListener('input',e=>{ const a=autoQty(p); p.qty=(a!=null)?+a.toFixed(3):0; inQ.value=p.qty||''; upd(); });
+    inQ.addEventListener('keydown',e=>{ e.preventDefault(); });
     tr.querySelector('.xbtn').onclick=()=>{pmRows.splice(i,1);if(!pmRows.length)pmRows.push(pmBlank());renderPmTable()};
     upd();
     tb.appendChild(tr);
@@ -27046,7 +27069,7 @@ function updPmCount(){
   const bad=started.length-ok;
   $('pmCount').textContent=started.length
     ?(ok+' item(s) ready'+(bad?' · '+bad+' row(s) need Item, Floor & Qty':'')+' — will save under '+fmtMed($('pmDate').value||curDate))
-    :'Select Group → Item → Floor, then enter dims or quantity. Empty rows are ignored.';
+    :'Select Group → Item → Floor, then enter No / Length / Breadth / Height — Qty is worked out by itself. Empty rows are ignored.';
 }
 $('pmSave').onclick=()=>{
   const dt=$('pmDate').value;
@@ -27106,6 +27129,21 @@ function floorOf(p){
   var bf=b?String(b.floor||'').trim():'';
   return bf||String((p&&p.floor)||'').trim();
 }
+/* vendors and work orders for the progress form — from Work Orders / Contracts and the vendor list */
+function pgVendorList(){
+  var set={};
+  try{ (S.workOrders||[]).forEach(function(w){ var v=String((w&&w.vendor)||'').trim(); if(v)set[v]=1; }); }catch(e){}
+  try{ (S.vendors||[]).forEach(function(v){ v=String(v||'').trim(); if(v)set[v]=1; }); }catch(e){}
+  try{ Object.keys(S.days||{}).forEach(function(d){ ((S.days[d]||{}).progress||[]).forEach(function(p){ var v=String((p&&p.vendor)||'').trim(); if(v)set[v]=1; }); }); }catch(e){}
+  return Object.keys(set).sort(function(a,b){ return a.localeCompare(b); });
+}
+function pgWoList(vendor){
+  var v=String(vendor||'').trim().toLowerCase(), out=[];
+  try{ (S.workOrders||[]).forEach(function(w){ if(!w)return; var s=String(w.serial||'').trim(); if(!s)return;
+    if(v&&String(w.vendor||'').trim().toLowerCase()!==v)return;
+    out.push({serial:s,title:String(w.title||w.subSeg||'').trim(),vendor:String(w.vendor||'').trim()}); }); }catch(e){}
+  return out.sort(function(a,b){ return a.serial.localeCompare(b.serial,undefined,{numeric:true}); });
+}
 function renderProg(){
   /* ---- READ-ONLY VIEW ------------------------------------------------------
      Nothing on this sheet is editable. It only displays what was entered, so the
@@ -27114,7 +27152,7 @@ function renderProg(){
   $('progDateLabel').textContent=fmtMed(curDate);
   const tb=$('progTable').tBodies[0];tb.innerHTML='';
   const list=day(curDate).progress;
-  if(!list.length){tb.innerHTML='<tr><td colspan="13" style="color:var(--faint);padding:10px;font-size:.83rem">No quantities recorded on '+fmtMed(curDate)+' — click <b>+ New</b> to open the entry form.</td></tr>';return}
+  if(!list.length){tb.innerHTML='<tr><td colspan="15" style="color:var(--faint);padding:10px;font-size:.83rem">No quantities recorded on '+fmtMed(curDate)+' — click <b>+ New</b> to open the entry form.</td></tr>';return}
   const itemLabel=itemLabeller(S.boq);
   const dimTxt=v=>{const n=num(v);return n==null?'–':fmt(n)};
   list.forEach((p,i)=>{
@@ -27127,6 +27165,8 @@ function renderProg(){
     tr.innerHTML=`<td class="dim" style="text-align:center">${i+1}</td>
       <td><div style="font-weight:600;color:var(--ink)">${esc(b?itemLabel(b):'(item removed from BOQ)')}</div>${sb?`<div style="font-size:.7rem;color:var(--muted);font-weight:600;margin-top:3px;line-height:1.2">↳ ${esc(sb)}</div>`:''}</td>
       <td class="ro">${esc(floorOf(p)||'—')}</td>
+      <td class="ro" style="font-size:.78rem">${esc(p.vendor||'—')}</td>
+      <td class="ro" style="text-align:center">${esc(p.wo||'—')}</td>
       <td class="ro" style="text-align:right">${b?fmt(b.qty):'—'}</td>
       <td class="ro" style="text-align:center">${b?esc(b.unit||'—'):'—'}</td>
       <td class="ro" style="text-align:right">${dimTxt(p.no)}</td>
@@ -56481,7 +56521,7 @@ function ISOd(v){
   var d2=new Date(s); return isNaN(d2)?'':iso(d2);
 }
 
-var PG_COLS=['Date','BOQ ID','Item Description','Group','Sub Head','Floor','Unit',
+var PG_COLS=['Date','BOQ ID','Item Description','Group','Sub Head','Floor','Sub Contractor / Vendor','Work Order #','Unit',
              'No','Length','Breadth','Height','Quantity'];
 
 /* ---------------- what is on record ---------------- */
@@ -56493,7 +56533,7 @@ function pgRows(){
     ((S.days[d]&&S.days[d].progress)||[]).forEach(function(p){
       var b=byId[p.boqId]||{};
       out.push([d, p.boqId||'', b.name||'', p.group||b.group||'', p.sub||b.sub||'',
-                p.floor||b.floor||'', b.unit||'',
+                p.floor||b.floor||'', p.vendor||'', p.wo||'', b.unit||'',
                 p.no===''||p.no==null?'':N(p.no),
                 p.len===''||p.len==null?'':N(p.len),
                 p.br===''||p.br==null?'':N(p.br),
@@ -56657,6 +56697,8 @@ function pgHeadMap(row){
     else if(m.group==null && /^group/.test(t))m.group=i;
     else if(m.sub==null && /^(sub|subhead|subsection)/.test(t))m.sub=i;
     else if(m.floor==null && /(floor|level|segment)/.test(t))m.floor=i;
+    else if(m.vendor==null && /(vendor|contractor|supplier)/.test(t))m.vendor=i;
+    else if(m.wo==null && /^(workorder|wo|workorderno|wono)/.test(t))m.wo=i;
     else if(m.unit==null && /^unit/.test(t))m.unit=i;
     else if(m.no==null && /^(no|nos|number|count)$/.test(t))m.no=i;
     else if(m.len==null && /^(length|len|l)$/.test(t))m.len=i;
@@ -56699,6 +56741,7 @@ function pgParse(aoa){
     if(!q){ bad.push({row:i+1,why:'quantity is zero',what:b.name}); continue; }
     out.push({d:d, row:{group:S2(g('group'))||String(b.group||''), sub:S2(g('sub'))||String(b.sub||''),
       boqId:b.id, floor:S2(g('floor'))||String(b.floor||''),
+      vendor:S2(g('vendor')), wo:S2(g('wo')),
       no:no, len:len, br:br, ht:ht, qty:Math.round(q*10000)/10000}});
   }
   return {rows:out,bad:bad,err:''};
