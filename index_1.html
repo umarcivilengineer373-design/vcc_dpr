@@ -56505,7 +56505,10 @@ function N(v){ var n=parseFloat(String(v==null?'':v).replace(/[, ]/g,'')); retur
 function S2(v){ return String(v==null?'':v).trim(); }
 function ISOd(v){
   if(v==null||v==='')return '';
-  if(v instanceof Date&&!isNaN(v))return iso(v);
+  /* an Excel date comes through as a Date that can sit a few minutes before midnight
+     (the reader's time-zone quirk) — so in Pakistan 19 Sept read as 18 Sept. Rounding
+     to the nearest day puts it right. */
+  if(v instanceof Date&&!isNaN(v)){ var dd=new Date(v.getFullYear(),v.getMonth(),v.getDate()); if(v.getHours()>=12)dd.setDate(dd.getDate()+1); return iso(dd); }
   var s=String(v).trim();
   if(/^\d{4}-\d{2}-\d{2}/.test(s))return s.slice(0,10);
   if(/^\d{5}$/.test(s)){ var d=new Date(Date.UTC(1899,11,30)+(+s)*86400000); if(!isNaN(d))return iso(d); }
@@ -56544,34 +56547,82 @@ function pgRows(){
   return out;
 }
 
-/* ---------------- export ---------------- */
+/* ---------------- export ----------------
+   One workbook, everything on record from the first day to the last:
+     Progress      — every measurement line, date by date, with cumulative and %
+     Day Summary   — one line per day (DPR no · lines · quantity)
+     Item Summary  — one line per BOQ item: BOQ qty · done · balance · %
+     BOQ / Floors / Vendors / Work Orders — the master lists the form's drop-downs read
+   The Progress sheet carries the BOQ ID column, so the same file imports back.      */
 function pgExport(){
-  var rows=pgRows();
-  if(!rows.length){ T('No measurement on record yet.'); return; }
+  var raw=pgRows();
+  if(!raw.length){ T('No measurement on record yet.'); return; }
   var proj=''; try{ proj=(PROJ&&PROJ.name)||(S.settings&&S.settings.project)||'project'; }catch(e){ proj='project'; }
-  var boq=[]; try{ boq=(S.boq||[]).map(function(b){
-    return [b.id||'', b.name||'', b.group||'', b.sub||'', b.floor||'', b.unit||'', N(b.qty), N(b.rate)]; }); }catch(e){}
+  var byId={}; try{ (S.boq||[]).forEach(function(b){ byId[b.id]=b; }); }catch(e){}
+  var fmtD=function(d){ try{ return fmtMed(d); }catch(e){ return d; } };
+  var first=raw[0][0], last=raw[raw.length-1][0];
+  var span='from '+fmtD(first)+' to '+fmtD(last);
+  /* ---- Progress, with a running cumulative per item ---- */
+  var cum={}, lines=[], totQ=0, n=0;
+  raw.forEach(function(r){
+    var d=r[0], id=r[1], b=byId[id]||{}, q=N(r[13]);
+    cum[id]=Math.round(((cum[id]||0)+q)*10000)/10000; n++; totQ+=q;
+    var bq=N(b.qty), pct=bq?Math.round(cum[id]/bq*1000)/10:'';
+    lines.push([n, d, id, r[3], r[4], r[2], r[5], r[6], r[7], r[8], bq||'', r[9], r[10], r[11], r[12], q, cum[id], pct]);
+  });
+  var PH=['S.No','Date','BOQ ID','WBS Group / BOQ Name','Sub Segment','Item Description','Floor','Sub Contractor / Vendor','Work Order #','Unit','BOQ Qty','No','Length','Breadth','Height','Qty','Cumulative','% Done'];
+  var PA=['i','d','c','l','l','b','l','l','c','c','n','n','n','n','n','n','n','p'];
+  /* ---- day summary ---- */
+  var days={}, dayOrder=[];
+  raw.forEach(function(r){ var d=r[0]; if(!days[d]){ days[d]={n:0,q:0,items:{},v:{}}; dayOrder.push(d); } days[d].n++; days[d].q+=N(r[13]); days[d].items[r[1]]=1; if(r[6])days[d].v[r[6]]=1; });
+  var dayRows=dayOrder.map(function(d,i){ var x=days[d], rn=''; try{ rn=reportNo(d); }catch(e){}
+    return [i+1, d, rn, x.n, Object.keys(x.items).length, Object.keys(x.v).join(', '), x.q]; });
+  /* ---- item summary ---- */
+  var itemRows=[]; var lastDay={};
+  raw.forEach(function(r){ lastDay[r[1]]=r[0]; });
+  Object.keys(cum).forEach(function(id){ var b=byId[id]||{}, bq=N(b.qty), done=cum[id];
+    itemRows.push([id, b.group||'', b.sub||'', b.name||'', b.floor||'', b.unit||'', bq||'', Math.round(done*1000)/1000, bq?Math.round(Math.max(0,bq-done)*1000)/1000:'', bq?Math.round(done/bq*1000)/10:'', lastDay[id]||'']); });
+  itemRows.sort(function(a,b){ return String(a[1]).localeCompare(String(b[1]))||String(a[3]).localeCompare(String(b[3])); });
+  /* ---- master lists: what the form's drop-downs read ---- */
+  var boq=[]; try{ boq=(S.boq||[]).map(function(b,i){ var q=N(b.qty), rt=N(b.rate);
+    return [i+1, b.id||'', b.group||'', b.sub||'', b.name||'', b.floor||'', b.unit||'', q, rt, q*rt]; }); }catch(e){}
+  var floors=[]; try{ var fs={}; (S.boq||[]).forEach(function(b){ var k=String(b.group||'').trim()+'|'+String(b.floor||'').trim(); if(!b.floor||fs[k])return; fs[k]=1; floors.push([String(b.group||'').trim(), String(b.floor||'').trim()]); }); }catch(e){}
+  floors.sort(function(a,b){ return String(a[0]).localeCompare(String(b[0]))||String(a[1]).localeCompare(String(b[1])); });
+  var vendors=[]; try{ var vl=(typeof pgVendorList==='function')?pgVendorList():[]; vendors=vl.map(function(v,i){ var wos=(typeof pgWoList==='function')?pgWoList(v):[]; var used=0; raw.forEach(function(r){ if(String(r[6]||'').trim()===v)used++; }); return [i+1, v, wos.length, wos.map(function(w){ return w.serial; }).join(', '), used]; }); }catch(e){}
+  var wos=[]; try{ wos=(S.workOrders||[]).map(function(w,i){ return [i+1, String(w.serial||''), String(w.vendor||''), String(w.title||''), String(w.subSeg||w.proj||''), (typeof cvdVal==='function'?cvdVal(w):N(w.totalValue))||'', String(w.date||w.woDate||'')]; }); }catch(e){}
   try{
     var sheets=[
-      xlsxSheet({ raw:true, name:'Progress', head:PG_COLS,
-        align:['d','b','l','l','l','l','c','n','n','n','n','n'], rows:rows }),
-      xlsxSheet({ raw:true, name:'BOQ', head:['BOQ ID','Item Description','Group','Sub Head','Floor','Unit','BOQ Qty','Rate'],
-        align:['b','l','l','l','l','c','n','m'], rows:boq })
+      xlsxSheet({ name:'Progress', title:'Daily Progress — '+proj, sub:'every measurement on record · '+span+' · '+n+' lines', active:true,
+        head:PH, align:PA, rows:lines, totals:['','','','','','TOTAL','','','','','','','','','',Math.round(totQ*1000)/1000,'',''] }),
+      xlsxSheet({ name:'Day Summary', title:'Progress by day — '+proj, sub:span,
+        head:['S.No','Date','DPR No','Lines','Items','Sub Contractors / Vendors','Quantity (all units)'], align:['i','d','c','i','i','l','n'], rows:dayRows,
+        totals:['','TOTAL','',n,'','',Math.round(totQ*1000)/1000] }),
+      xlsxSheet({ name:'Item Summary', title:'Progress by BOQ item — '+proj, sub:'done against the BOQ, '+span,
+        head:['BOQ ID','WBS Group / BOQ Name','Sub Segment','Item Description','Floor','Unit','BOQ Qty','Done to date','Balance','% Done','Last entry'], align:['c','l','l','b','l','c','n','n','n','p','d'], rows:itemRows }),
+      xlsxSheet({ name:'BOQ', title:'BOQ master — '+proj, sub:'the items the entry form lists (Setup → BOQ)',
+        head:['S.No','BOQ ID','WBS Group / BOQ Name','Sub Segment','Item Description','Floor / Section','Unit','BOQ Qty','Rate','Amount'], align:['i','c','l','l','b','l','c','n','m','m'], rows:boq }),
+      xlsxSheet({ name:'Floors', title:'Floors / Sections — '+proj, sub:'as the Floor drop-down lists them, per WBS Group',
+        head:['WBS Group / BOQ Name','Floor / Section'], align:['l','b'], rows:floors }),
+      xlsxSheet({ name:'Vendors', title:'Sub Contractors / Vendors — '+proj, sub:'as the Vendor drop-down lists them',
+        head:['S.No','Sub Contractor / Vendor','Work Orders','WO Numbers','Progress lines'], align:['i','b','i','l','i'], rows:vendors }),
+      xlsxSheet({ name:'Work Orders', title:'Work Orders / Contracts — '+proj, sub:'as the Work Order # drop-down lists them',
+        head:['S.No','Work Order #','Sub Contractor / Vendor','Title of work order','Sub Segment','Value','Date'], align:['i','b','l','l','l','m','l'], rows:wos })
     ];
-    var name='Progress-'+String(proj).replace(/[^A-Za-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,28)+'-'+iso(new Date())+'.xlsx';
+    var name='Progress-'+String(proj).replace(/[^A-Za-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,28)+'-'+first+'-to-'+last+'.xlsx';
     var kb=Math.round(xlsxBuild(sheets,name)/1024);
-    T('⬇ '+rows.length+' measurement line'+(rows.length===1?'':'s')+' exported ('+kb+' KB). The same file imports straight back.');
+    T('⬇ '+n+' measurement line'+(n===1?'':'s')+' exported, '+span+' ('+kb+' KB) — 7 sheets. The Progress sheet imports straight back.');
   }catch(e){
+    console.warn('progress export',e);
     /* no Excel writer here — a CSV carries the same columns */
     var q=function(v){ v=String(v==null?'':v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
-    var body=[PG_COLS.map(q).join(',')].concat(rows.map(function(r){ return r.map(q).join(','); })).join('\n');
-    try{ download('Progress-'+iso(new Date())+'.csv','﻿'+body,'text/csv'); }
+    var body=[PH.map(q).join(',')].concat(lines.map(function(r){ return r.map(q).join(','); })).join('\n');
+    try{ download('Progress-'+iso(new Date())+'.csv','\ufeff'+body,'text/csv'); }
     catch(e2){
       var a=document.createElement('a');
-      a.href=URL.createObjectURL(new Blob(['﻿'+body],{type:'text/csv'}));
+      a.href=URL.createObjectURL(new Blob(['\ufeff'+body],{type:'text/csv'}));
       a.download='Progress-'+iso(new Date())+'.csv'; a.click();
     }
-    T('⬇ Exported as CSV — '+rows.length+' line'+(rows.length===1?'':'s')+'.');
+    T('⬇ Exported as CSV — '+n+' line'+(n===1?'':'s')+'.');
   }
 }
 /* an empty sheet with the right headings, for someone starting from scratch */
@@ -56727,6 +56778,7 @@ function pgParse(aoa){
     var d=ISOd(col.date==null?'':rw[col.date]);
     var id=g('id'), nm=g('name');
     if(!d&&!id&&!nm)continue;
+    if(!d&&!id&&/^total$/i.test(nm))continue;          /* the TOTAL row of an exported sheet */
     var b=(id&&byId[id])||(nm&&byName[nm.toLowerCase()])||null;
     if(!d){ bad.push({row:i+1,why:'no date',what:nm||id}); continue; }
     if(!b){ bad.push({row:i+1,why:'this item is not in the BOQ',what:nm||id}); continue; }
@@ -56756,6 +56808,7 @@ function pgPreview(parsed,fname,replace){
   var days={}; parsed.rows.forEach(function(x){ days[x.d]=(days[x.d]||0)+1; });
   var dayList=Object.keys(days).sort();
   var nowN=0; try{ dayList.forEach(function(d){ nowN+=((S.days[d]&&S.days[d].progress)||[]).length; }); }catch(e){}
+  var allN=0, allD=0; try{ Object.keys(S.days||{}).forEach(function(d){ var k=((S.days[d]||{}).progress||[]).length; if(k){ allN+=k; allD++; } }); }catch(e){}
   var rows=parsed.rows.slice(0,40).map(function(x,i){
     var b=(S.boq||[]).filter(function(y){ return y.id===x.row.boqId; })[0]||{};
     return '<tr><td style="text-align:center;color:#6d8199">'+(i+1)+'</td><td>'+X(fmtShort?fmtShort(x.d):x.d)+'</td>'+
@@ -56787,12 +56840,10 @@ function pgPreview(parsed,fname,replace){
       (parsed.rows.length>40?('<div style="font-size:.76rem;color:#6d8199;padding-bottom:10px">…and '+(parsed.rows.length-40)+' more.</div>'):'')+
     '</div>'+
     '<div style="padding:13px 18px;border-top:1px solid #e3eaf2;background:#f7fafd;display:flex;gap:9px;flex-wrap:wrap;align-items:center">'+
-      '<button id="pgAdd" style="background:#12283f;border:none;border-radius:9px;padding:9px 16px;font-size:.82rem;'+
-        'font-weight:700;color:#fff;cursor:pointer;font-family:inherit">➕ Add to the record</button>'+
-      '<button id="pgRep" style="background:#fff;border:1px solid #e3bcb7;border-radius:9px;padding:9px 16px;font-size:.82rem;'+
-        'font-weight:700;color:#b02a2a;cursor:pointer;font-family:inherit">♻ Replace these days</button>'+
+      '<button id="pgRep" style="background:#12283f;border:none;border-radius:9px;padding:9px 16px;font-size:.82rem;'+
+        'font-weight:700;color:#fff;cursor:pointer;font-family:inherit">⬆ Import — replaces the whole progress record</button>'+
       '<span style="font-size:.74rem;color:#6d8199;margin-left:auto">'+
-        (nowN?('these days already hold '+nowN+' line'+(nowN===1?'':'s')):'nothing on these days yet')+'</span>'+
+        (allN?('the record holds '+allN+' line'+(allN===1?'':'s')+' on '+allD+' day'+(allD===1?'':'s')+' now — all of it is taken out first (kept aside in Setup → Replaced sheets)'):'nothing on record yet')+'</span>'+
       '<button id="pgX" style="background:#eef3f8;border:1px solid #dde5ee;border-radius:9px;padding:9px 15px;font-size:.82rem;'+
         'font-weight:700;color:#27486a;cursor:pointer;font-family:inherit">Cancel</button>'+
     '</div></div>';
@@ -56805,36 +56856,31 @@ function pgPreview(parsed,fname,replace){
   var close=function(){ ov.remove(); };
   ov.querySelector('#pgX').onclick=close;
   ov.addEventListener('mousedown',function(e){ if(e.target===ov)close(); });
-  ov.querySelector('#pgAdd').onclick=function(){ pgApply(parsed,false); close(); };
-  ov.querySelector('#pgRep').onclick=function(){
-    Promise.resolve((typeof uiConfirm==='function')
-      ? uiConfirm('Replace the measurement on '+dayList.length+' day'+(dayList.length===1?'':'s')+'?\n\n'+
-          'What is on those days now ('+nowN+' line'+(nowN===1?'':'s')+') is kept aside so it can be put back from Setup → Replaced sheets.','Replace')
-      : window.confirm('Replace?')).then(function(ok){ if(ok){ pgApply(parsed,true); close(); } });
-  };
+  ov.querySelector('#pgRep').onclick=function(){ pgApply(parsed,true); close(); };
 }
 
+/* the sheet IS the record: everything on record goes out first (kept aside), then the
+   sheet comes in — so an import never doubles a line, whatever was there before */
 function pgApply(parsed,replace){
   var days={}; parsed.rows.forEach(function(x){ days[x.d]=1; });
-  var dayList=Object.keys(days);
-  if(replace){
-    /* the old rows are kept aside first, so nothing is truly lost */
-    var snap={};
-    dayList.forEach(function(d){ snap[d]=((S.days[d]&&S.days[d].progress)||[]).slice(); });
-    try{ if(typeof rplSnap==='function')rplSnap('prog',snap,'progress replaced by a sheet ('+dayList.length+' day(s))'); }catch(e){}
-    dayList.forEach(function(d){ day(d).progress=[]; });
-  }
+  var snap={}, cleared=[], oldN=0;
+  try{ Object.keys(S.days||{}).forEach(function(d){
+    var p=(S.days[d]&&S.days[d].progress)||[]; if(!p.length)return;
+    snap[d]=p.slice(); oldN+=p.length; cleared.push(d); S.days[d].progress=[]; days[d]=1;
+  }); }catch(e){}
+  try{ if(cleared.length&&typeof rplSnap==='function')rplSnap('prog',snap,'progress replaced by a sheet ('+oldN+' line(s) on '+cleared.length+' day(s))'); }catch(e){}
   var n=0;
   parsed.rows.forEach(function(x){
     day(x.d).progress.push(Object.assign({},x.row));
     n++;
   });
+  var dayList=Object.keys(days);
   save(true);
   try{ renderProg&&renderProg(); }catch(e){}
   try{ refreshAux&&refreshAux(); }catch(e){}
   try{ if(window.cloudPushDays)window.cloudPushDays(dayList).then(function(k){
     if(k)T('☁ '+k+' day(s) sent to the database.'); }); }catch(e){}
-  T('✅ '+n+' line'+(n===1?'':'s')+(replace?' imported — those days were replaced.':' added to the record.'));
+  T('✅ '+n+' line'+(n===1?'':'s')+' imported — the previous record ('+oldN+' line'+(oldN===1?'':'s')+') was taken out first and kept aside.');
 }
 
 function pgImportFile(file){
