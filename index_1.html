@@ -51031,10 +51031,20 @@ function taskAll(){
         raw:{m:m,p:p}});
     });
   });
-  /* Daily Work To Do */
+  /* Daily Work To Do — a pending line is copied on to the next day, so the same
+     work can sit on several days; the register shows it once, on its latest day */
+  var latest={};
+  (COS.dwt||[]).forEach(function(r){
+    if(r._del||!String(r.work||'').trim())return;
+    var k=String(r.work||'').trim().toLowerCase()+'|'+String(r.proj||'').trim().toLowerCase();
+    var c=latest[k];
+    if(!c||String(r.d||'')>String(c.d||'')||(String(r.d||'')===String(c.d||'')&&num(r.ord)>num(c.ord)))latest[k]=r;
+  });
   (COS.dwt||[]).forEach(function(r){
     if(r._del)return;
     if(!String(r.work||'').trim())return;
+    var lk=String(r.work||'').trim().toLowerCase()+'|'+String(r.proj||'').trim().toLowerCase();
+    if(latest[lk]!==r)return;                       /* an earlier copy of the same work */
     var st=(r.status==='Done')?'Completed':(r.status==='Cancelled'?'Cancelled':(r.status||'Open'));
     out.push({src:'daily',kind:'Daily',id:r.id,sno:'',date:r.d||'',project:r.proj||'',
       detail:r.work||'',sub:r.note||'',location:'',poc:r.by||'',
@@ -51136,7 +51146,7 @@ function cosTaskTab(body){
             (r.src==='task'
               ? ((cosCanEdit()?'<button class="g" data-tu="'+E(r.id)+'" title="Add an update">💬</button> <button class="g" data-te="'+E(r.id)+'" title="Edit">✎</button>':'')+
                  (cosCanDel()?' <button class="d" data-td="'+E(r.id)+'" title="Delete">✕</button>':''))
-              : ((cosCanEdit()?'<button class="g" data-tgo="'+E(r.src)+'|'+E(r.id)+'|edit" title="Edit where it lives">✎</button> ':'')+
+              : ((cosCanEdit()?'<button class="g" data-tedit="'+E(r.src)+'|'+E(r.id)+'" title="Edit here">✎</button> ':'')+
                  '<button class="g" data-tgo="'+E(r.src)+'|'+E(r.id)+'" title="Open where it lives">📖</button>'))+
           '</td></tr>';
       }).join(''):'<tr><td colspan="12" class="empty">Nothing here yet'+(TF.q||TF.proj||TF.poc||TF.stat||TF.prio||TF.from||TF.to||TF.src?' for this filter':'')+'.</td></tr>')+
@@ -51156,6 +51166,8 @@ function cosTaskTab(body){
   /* a MOM point or a daily line opens where it belongs */
   body.querySelectorAll('[data-tst]').forEach(function(sl){ sl.addEventListener('change',function(){
     var pr=String(sl.dataset.tst).split('|'); taskSetStatus(pr[0],pr.slice(1).join('|'),sl.value); }); });
+  body.querySelectorAll('[data-tedit]').forEach(function(b2){ b2.onclick=function(){
+    var pr=String(b2.dataset.tedit).split('|'); taskEditOther(pr[0],pr.slice(1).join('|')); }; });
   body.querySelectorAll('[data-tgo]').forEach(function(b2){ b2.onclick=function(){
     var pr=String(b2.dataset.tgo).split('|'), edit=pr[pr.length-1]==='edit';
     if(edit)pr.pop();
@@ -51222,6 +51234,64 @@ function taskSetStatus(src,id,v){
     r.status=v; r._u=nowMs();
   }
   cosSave(); cosPaint(); T('\u2705 Status \u2192 '+v);
+}
+
+/* ---------- edit a Daily Work To Do line or a MOM point right here ---------- */
+function taskEditOther(src,id){
+  if(!cosNeedEdit())return;
+  var host=document.getElementById('tkForm'); if(!host)return;
+  var F=function(l,inner){ return '<div><label class="fl">'+l+'</label>'+inner+'</div>'; };
+  var box=function(title,grid,extra){ return '<div style="border:1.5px solid #2c6fa8;border-radius:12px;padding:13px;margin-bottom:13px;background:#f8fbfe">'+
+    '<div style="font-weight:800;color:#12283f;font-size:.86rem;margin-bottom:10px">'+title+'</div>'+
+    '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">'+grid+'</div>'+extra+
+    '<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button class="p" id="toSave">\uD83D\uDCBE Save</button><button class="g" id="toCancel">Cancel</button></div></div>'+cosDataLists(); };
+  var wire=function(onSave){ host.scrollIntoView({behavior:'smooth',block:'nearest'});
+    host.querySelector('#toCancel').onclick=function(){ host.innerHTML=''; };
+    host.querySelector('#toSave').onclick=onSave; };
+  var v=function(sel){ var e=host.querySelector(sel); return e?String(e.value||'').trim():''; };
+  if(src==='daily'){
+    var r=(COS.dwt||[]).find(function(x){ return x.id===id; }); if(!r)return;
+    var draw=function(){
+      host.innerHTML=box('\u270E Edit daily work \u2014 '+E(dShort(r.d))+(r.raised&&r.raised!==r.d?(' (raised '+E(dShort(r.raised))+')'):''),
+        F('Project','<input list="cosProjL" id="toP" value="'+E(r.proj||'')+'">')+
+        F('Responsible','<input list="cosPocL" id="toC" value="'+E(r.by||'')+'">')+
+        F('Target date','<input type="date" id="toT" value="'+E(r.tgt||'')+'">')+
+        F('Priority','<select id="toR">'+selOpts(COS_PRIOR,r.prio||'Normal')+'</select>')+
+        F('Status','<select id="toS">'+selOpts(DWT_STATUS,r.status||'Open')+'</select>'),
+        '<div style="margin-top:10px"><label class="fl">Work / To Do</label><textarea id="toW">'+E(r.work||'')+'</textarea></div>'+
+        '<div style="margin-top:10px"><label class="fl">Remarks</label><textarea id="toM" style="min-height:44px">'+E(r.note||'')+'</textarea></div>');
+      wire(function(){
+        var w=v('#toW'); if(!w){ T('Write what the work is.'); host.querySelector('#toW').focus(); return; }
+        r.work=w; r.proj=v('#toP'); r.by=v('#toC'); r.tgt=v('#toT'); r.prio=v('#toR')||'Normal'; r.status=v('#toS')||'Open'; r.note=v('#toM'); r._u=nowMs();
+        if(r.proj&&COS.lists.projects.indexOf(r.proj)<0){ COS.lists.projects.push(r.proj); cosListKeep('projects',r.proj); }
+        if(r.by&&COS.lists.poc.indexOf(r.by)<0){ COS.lists.poc.push(r.by); cosListKeep('poc',r.by); }
+        COS._u=nowMs(); cosSave(); host.innerHTML=''; cosPaint(); T('\u2705 Daily work updated.');
+      });
+    };
+    /* a locked day opens for this one change with the admin password */
+    if(typeof dwtLocked==='function'&&dwtLocked(r.d)){
+      cosPass('\uD83D\uDD12 '+dShort(r.d)+' is locked','Admin password to change this line.').then(function(ok){ if(ok==null)return; draw(); });
+    }else draw();
+    return;
+  }
+  if(src==='mom'){
+    var pr=id.split('|'), m=(COS.mom||[]).find(function(x){ return x.id===pr[0]; }); if(!m)return;
+    var p0=(m.points||[]).find(function(x){ return x.id===pr.slice(1).join('|'); }); if(!p0)return;
+    var p=(typeof momPt==='function')?momPt(p0):p0;
+    host.innerHTML=box('\u270E Edit MOM point \u2014 '+E(m.ref||'MOM')+' \u00b7 '+E(dShort(m.date||'')),
+      F('Responsible','<input list="cosPocL" id="toC" value="'+E(p.by||'')+'">')+
+      F('Due','<input id="toT" value="'+E(p.due||'')+'" placeholder="23-Sep / Immediate">')+
+      F('Status','<select id="toS">'+selOpts(COS_MOMSTAT,p.status||'Open')+'</select>'),
+      '<div style="margin-top:10px"><label class="fl">Agenda / point</label><textarea id="toA" style="min-height:44px">'+E(p.agenda||'')+'</textarea></div>'+
+      '<div style="margin-top:10px"><label class="fl">Action</label><textarea id="toW">'+E(p.action||'')+'</textarea></div>'+
+      '<div style="margin-top:10px"><label class="fl">Remarks</label><textarea id="toM" style="min-height:44px">'+E(p.rem||'')+'</textarea></div>');
+    wire(function(){
+      var a=v('#toA'), w=v('#toW'); if(!a&&!w){ T('Write the point or the action.'); return; }
+      p0.agenda=a; p0.action=w; p0.by=v('#toC'); p0.due=v('#toT'); p0.status=v('#toS')||'Open'; p0.rem=v('#toM');
+      if(p0.ur!=null)p0.ur=a; if(p0.en!=null)p0.en=w;
+      m._u=nowMs(); COS._u=nowMs(); cosSave(); host.innerHTML=''; cosPaint(); T('\u2705 MOM point updated.');
+    });
+  }
 }
 
 /* ---------- add / edit one task ---------- */
@@ -53541,7 +53611,22 @@ window.__cosKit={
    Today's Tasks / Work To do · Previous Tasks · Tasks By Name — the way the
    office sheet reads, from everything on the register (tasks, MOM points and
    the Daily Work To Do) for one day. Nothing is typed here; it only prints. */
-var DR={d:'',proj:'',st:'open',poc:''};
+var DR={d:'',proj:'',st:'open',poc:'',prio:'',by:''};
+/* how the rows are arranged inside every block: by target date (default), name, project, status or priority */
+var DR_BY=[['','Dead line (default)'],['poc','Name / POC'],['project','Project'],['status','Status'],['priority','Priority']];
+var DR_PRIO_RANK={'Critical':0,'Urgent':0,'High':1,'Normal':2,'Low':3};
+function drByLabel(){ var o=DR_BY.filter(function(z){ return z[0]===DR.by; })[0]; return o?o[1]:''; }
+function drKey(x){
+  if(DR.by==='poc')return String(x.poc||'').trim().toLowerCase()||'\uffff';
+  if(DR.by==='project')return String(x.project||'').trim().toLowerCase()||'\uffff';
+  if(DR.by==='status')return String(x.status||'Open');
+  if(DR.by==='priority'){ var r=DR_PRIO_RANK[String(x.priority||'Normal')]; return String(r==null?9:r); }
+  return '';
+}
+function drOrder(a,b){
+  var ka=drKey(a), kb=drKey(b);
+  return ka.localeCompare(kb)||drTarget(a).localeCompare(drTarget(b))||String(a.project||'').localeCompare(String(b.project||''))||String(a.detail||'').localeCompare(String(b.detail||''));
+}
 var DR_ST=[['open','All pending (Open + In Progress + On Hold)'],['Open','Open only'],['In Progress','In Progress'],['On Hold','On Hold'],['Completed','Completed / Done'],['Cancelled','Cancelled'],['all','Everything']];
 function drStOk(x){
   if(DR.st==='all')return true;
@@ -53561,6 +53646,7 @@ function drItems(D){
     if(!drStOk(x))return false;
     if(DR.proj&&String(x.project||'').trim()!==DR.proj)return false;
     if(DR.poc&&String(x.poc||'').trim()!==DR.poc)return false;
+    if(DR.prio&&String(x.priority||'Normal')!==DR.prio)return false;
     if(x.src==='daily'){
       var r=x.raw||{};
       if(r.d===D)return true;
@@ -53585,7 +53671,7 @@ function drItems(D){
     else if(!r||r<D)prevL.push(x);
     else todayL.push(x);                       /* a future-dated item that is somehow open — keep it in view */
   });
-  var byOrder=function(a,b){ return drTarget(a).localeCompare(drTarget(b))||String(a.project||'').localeCompare(String(b.project||''))||String(a.detail||'').localeCompare(String(b.detail||'')); };
+  var byOrder=drOrder;
   todayL.sort(byOrder); prevL.sort(byOrder);
   var byName={}, names=[];
   out.forEach(function(x){ var n=String(x.poc||'').trim()||'(no name)'; if(!byName[n]){ byName[n]=[]; names.push(n); } byName[n].push(x); });
@@ -53600,7 +53686,7 @@ function drCell(v,cls){ return '<td class="'+(cls||'')+'">'+v+'</td>'; }
 /* one line: Task Name · Dead Line · (POC) · Status */
 function drLine(x,D,withPoc){
   var tg=drTarget(x), late=tg&&tg<D&&drOpen(x);
-  var extra=[]; if(x.project)extra.push(x.project); if(x.src==='mom')extra.push(x.ref||'MOM'); if(x.sub)extra.push(x.sub);
+  var extra=[]; if(x.project)extra.push(x.project); if(x.src==='mom')extra.push(x.ref||'MOM'); var pr=String(x.priority||'Normal'); if(pr!=='Normal')extra.push('Priority: '+pr); if(x.sub)extra.push(x.sub);
   var st=String(x.status||'Open'), stc=st==='Completed'?'dr-ok':(st==='Cancelled'?'dr-x':(late?'dr-late':''));
   return '<tr>'+drCell(E(x.detail||'')+(extra.length?('<div class="dr-m">'+E(extra.join(' · '))+'</div>'):''),'dr-t')+
     drCell(tg?(E(dShort(tg))+(late?'<div class="dr-m dr-late">overdue</div>':'')):'—','dr-d')+
@@ -53629,7 +53715,7 @@ function drGroup(title,n){ return '<tr class="dr-g"><td colspan="3">'+E(title)+'
 function drHTML(D,proj,forPrint){
   var it=drItems(D);
   var all=it.today.concat(it.prev);
-  var byOrder=function(a,b){ return drTarget(a).localeCompare(drTarget(b))||String(a.project||'').localeCompare(String(b.project||''))||String(a.detail||'').localeCompare(String(b.detail||'')); };
+  var byOrder=drOrder;
   all.sort(byOrder);
   /* 1 · everything */
   var total=all.map(function(x){ return drLine(x,D,true); });
@@ -53677,10 +53763,12 @@ function cosDrepTab(body){
       '<div><label class="fl">Project</label><select id="drP">'+selOpts(cosProjects(),DR.proj,'All projects')+'</select></div>'+
       '<div><label class="fl">Status</label><select id="drS">'+DR_ST.map(function(o){ return '<option value="'+o[0]+'"'+(DR.st===o[0]?' selected':'')+'>'+o[1]+'</option>'; }).join('')+'</select></div>'+
       '<div><label class="fl">Name / POC</label><select id="drC">'+selOpts(drNames(),DR.poc,'Everyone')+'</select></div>'+
+      '<div><label class="fl">Priority</label><select id="drR">'+selOpts(COS_PRIOR,DR.prio,'Any priority')+'</select></div>'+
+      '<div><label class="fl">Arrange by</label><select id="drB">'+DR_BY.map(function(o){ return '<option value="'+o[0]+'"'+(DR.by===o[0]?' selected':'')+'>'+o[1]+'</option>'; }).join('')+'</select></div>'+
     '</div></div></div>'+
     '<div class="cos-card"><div class="cos-cb" style="padding:14px 16px">'+
       '<div style="display:flex;align-items:baseline;gap:12px;margin-bottom:10px"><div style="font-size:1.05rem;font-weight:800;color:#12283f">Daily Report \u2014 '+E(dLong(D))+'</div>'+
-      '<div style="font-size:.78rem;color:#6d8199">'+E(DR.proj||'all projects')+' \u00b7 '+E(drStLabel())+(DR.poc?(' \u00b7 '+E(DR.poc)):'')+'</div></div>'+
+      '<div style="font-size:.78rem;color:#6d8199">'+E(DR.proj||'all projects')+' \u00b7 '+E(drStLabel())+(DR.poc?(' \u00b7 '+E(DR.poc)):'')+(DR.prio?(' \u00b7 '+E(DR.prio)+' priority'):'')+(DR.by?(' \u00b7 arranged by '+E(drByLabel())):'')+'</div></div>'+
       drHTML(D,DR.proj,false)+
     '</div></div>';
   var q=function(s){ return body.querySelector(s); };
@@ -53691,8 +53779,10 @@ function cosDrepTab(body){
   q('#drP').addEventListener('change',function(){ DR.proj=this.value; cosPaint(); });
   q('#drS').addEventListener('change',function(){ DR.st=this.value; cosPaint(); });
   q('#drC').addEventListener('change',function(){ DR.poc=this.value; cosPaint(); });
+  q('#drR').addEventListener('change',function(){ DR.prio=this.value; cosPaint(); });
+  q('#drB').addEventListener('change',function(){ DR.by=this.value; cosPaint(); });
   q('#drPrint').onclick=function(){
-    cosPrint('Daily Report \u2014 '+dLong(D)+(DR.proj?(' \u00b7 '+DR.proj):'')+(DR.st!=='open'?(' \u00b7 '+drStLabel()):'')+(DR.poc?(' \u00b7 '+DR.poc):''),
+    cosPrint('Daily Report \u2014 '+dLong(D)+(DR.proj?(' \u00b7 '+DR.proj):'')+(DR.st!=='open'?(' \u00b7 '+drStLabel()):'')+(DR.poc?(' \u00b7 '+DR.poc):'')+(DR.prio?(' \u00b7 '+DR.prio+' priority'):'')+(DR.by?(' \u00b7 by '+drByLabel()):''),
       '<style>@page{size:A4 landscape;margin:7mm} body{margin:0} .hd{margin-bottom:8px} '+drCss('')+
         ' .dr{width:100%} .dr td,.dr th{font-size:11.5px;padding:5px 7px;-webkit-print-color-adjust:exact;print-color-adjust:exact}'+
         ' .dr .dr-l{font-size:13px;width:120px} .dr .dr-d{width:96px} .dr .dr-p{width:130px} .dr .dr-s{width:90px} .dr .dr-m{font-size:9px}'+
