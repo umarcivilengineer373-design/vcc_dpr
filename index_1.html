@@ -40353,7 +40353,7 @@ function mrBackupHTML(){
       '<input type="file" id="mrImportInput" accept=".json,application/json" style="display:none">'+
       '<button class="ghost" id="mrBoqOnlyBtn" style="padding:8px 16px;font-size:.84rem;font-weight:700">⚕ Restore BOQ only</button>'+
       '<input type="file" id="mrBoqOnlyInput" accept=".json,application/json" style="display:none">'+
-      '<label style="display:flex;align-items:center;gap:7px;font-size:.82rem;color:var(--muted);margin-left:auto;cursor:pointer"><input type="checkbox" id="mrAutoBk"'+(abOn()?' checked':'')+'> auto-backup every 3 hours</label>'+
+      '<label style="display:flex;align-items:center;gap:7px;font-size:.82rem;color:var(--muted);margin-left:auto;cursor:pointer"><input type="checkbox" id="mrAutoBk"'+(abOn()?' checked':'')+'> auto-backup every 12 hours</label>'+
     '</div>'+
     '<p style="font-size:.76rem;color:var(--muted);margin-top:12px;line-height:1.6">'+
       '<b>⬇ JSON</b> saves one project — every day, the BOQ and Work Plan, work orders and bills, the store, '+
@@ -40368,8 +40368,8 @@ function mrBackupHTML(){
       '<b>⚕ Restore BOQ only</b> puts a backup\'s BOQ back without touching days, photos or bills. '+
       'Because the old item ids come back with it, every daily progress row that showed '+
       '“(item removed from BOQ)” links up again.<br>'+
-      '<b>Auto-backup every 3 hours</b> drops one all-projects file into Downloads '+
-      '(<code>SiteApp-ALL-&lt;date&gt;-&lt;hh&gt;h&lt;mm&gt;.json</code>) every three hours, counted from the '+
+      '<b>Auto-backup every 12 hours</b> drops one all-projects file into Downloads '+
+      '(<code>SiteApp-ALL-&lt;date&gt;-&lt;hh&gt;h&lt;mm&gt;.json</code>) every twelve hours, counted from the '+
       'last backup — so two files never land minutes apart. If the app was closed when one was due, '+
       'it is written the next time you open it. '+
       'It checks the data first — if a project\'s BOQ or days have collapsed it writes nothing and warns you, '+
@@ -40749,7 +40749,7 @@ function ab2(n){ return (n<10?'0':'')+n; }
    now. The time of the last backup is kept in localStorage, so closing the app
    and coming back the next day writes one straight away. Only this one file is
    written — the separate DAILY copy has been removed. */
-var AB_EVERY=3;                                   /* hours between backups */
+var AB_EVERY=12;                                  /* hours between backups */
 var AB_GAP_MS=AB_EVERY*60*60*1000;
 function abStamp(){
   var d=new Date();
@@ -40863,7 +40863,7 @@ function mrWire(ov){
     bof.onchange=function(e){ var f=e.target.files[0]; e.target.value=''; if(f)mrRestoreBoqFile(f); }; }
   var ab=ov.querySelector('#mrAutoBk');
   if(ab)ab.onchange=function(){ abSetOn(ab.checked);
-    toast(ab.checked?'Auto-backup on — a file will land in Downloads every 3 hours.':'Auto-backup turned off.');
+    toast(ab.checked?'Auto-backup on — a file will land in Downloads every 12 hours.':'Auto-backup turned off.');
     if(ab.checked){ try{ abTick(); }catch(e){} } };
   var im=ov.querySelector('#mrImportBtn'); var imf=ov.querySelector('#mrImportInput');
   if(im&&imf){ im.onclick=function(){ imf.click(); };
@@ -50805,7 +50805,7 @@ var COS_TABS=[
   ['today', '📅 CURRENT DAY TASK'],
   ['drep',  '🖨 DAILY REPORT'],
   ['dwt',   '🗓 DAILY WORK TO DO'],
-  ['pay',   '💰 PAYMENTS ISSUES'],
+  ['pay',   '💰 PENDING PAYMENTS'],
   ['set',   '⚙️ SETTINGS']
 ];
 
@@ -51020,7 +51020,7 @@ function taskAll(){
     var st=(r.status==='Done')?'Completed':(r.status==='Cancelled'?'Cancelled':(r.status||'Open'));
     out.push({src:'daily',kind:'Daily',id:r.id,sno:'',date:r.d||'',project:r.proj||'',
       detail:r.work||'',sub:r.note||'',location:'',poc:r.by||'',
-      target:r.tgt||r.d||'',targetTxt:'',priority:'Normal',status:st,
+      target:r.tgt||r.d||'',targetTxt:'',priority:r.prio||'Normal',status:st,
       flag:dueFlag(r.tgt||r.d,st),lu:null,nUpd:0,
       ref:(r.raised&&r.raised!==r.d)?('raised '+dShort(r.raised)):'',raw:r});
   });
@@ -51111,12 +51111,13 @@ function cosTaskTab(body){
           '<td>'+E(r.target?dShort(r.target):(r.targetTxt||'—'))+(fl?('<br>'+pill(fl)):'')+'</td>'+
           '<td>'+pill(r.priority||'Normal')+'</td>'+
           '<td>'+(lu?('<div style="white-space:pre-wrap">'+E(lu.t)+'</div><div style="font-size:.68rem;color:#8798ab;margin-top:2px">'+E(dShort(lu.d))+' · '+E(lu.by||'')+(r.nUpd>1?(' · '+r.nUpd+' updates'):'')+'</div>'):'<span style="color:#aab7c5">—</span>')+'</td>'+
-          '<td>'+pill(r.status||'Open')+'</td>'+
+          '<td>'+taskStatusCell(r)+'</td>'+
           '<td style="white-space:nowrap;text-align:right">'+
             (r.src==='task'
               ? ((cosCanEdit()?'<button class="g" data-tu="'+E(r.id)+'" title="Add an update">💬</button> <button class="g" data-te="'+E(r.id)+'" title="Edit">✎</button>':'')+
                  (cosCanDel()?' <button class="d" data-td="'+E(r.id)+'" title="Delete">✕</button>':''))
-              : '<button class="g" data-tgo="'+E(r.src)+'|'+E(r.id)+'" title="Open where it lives">📖</button>')+
+              : ((cosCanEdit()?'<button class="g" data-tgo="'+E(r.src)+'|'+E(r.id)+'|edit" title="Edit where it lives">✎</button> ':'')+
+                 '<button class="g" data-tgo="'+E(r.src)+'|'+E(r.id)+'" title="Open where it lives">📖</button>'))+
           '</td></tr>';
       }).join(''):'<tr><td colspan="12" class="empty">Nothing here yet'+(TF.q||TF.proj||TF.poc||TF.stat||TF.prio||TF.from||TF.to||TF.src?' for this filter':'')+'.</td></tr>')+
       '</tbody></table></div>'+
@@ -51133,9 +51134,12 @@ function cosTaskTab(body){
     TF.q=q.value; cosPaint(); var n=document.querySelector('#tfQ'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } },260); }); }
   if(B('#tkNew'))B('#tkNew').onclick=function(){ taskForm(null); };
   /* a MOM point or a daily line opens where it belongs */
+  body.querySelectorAll('[data-tst]').forEach(function(sl){ sl.addEventListener('change',function(){
+    var pr=String(sl.dataset.tst).split('|'); taskSetStatus(pr[0],pr.slice(1).join('|'),sl.value); }); });
   body.querySelectorAll('[data-tgo]').forEach(function(b2){ b2.onclick=function(){
-    var pr=String(b2.dataset.tgo).split('|');
-    if(pr[0]==='mom'){ MF.open=pr[1]; MF.sub='view'; MF.viewOne=1; COS_TAB='mom'; }
+    var pr=String(b2.dataset.tgo).split('|'), edit=pr[pr.length-1]==='edit';
+    if(edit)pr.pop();
+    if(pr[0]==='mom'){ MF.open=pr[1]; MF.sub=(edit&&cosCanEdit())?'entry':'view'; MF.viewOne=1; COS_TAB='mom'; }
     else {
       var r=(COS.dwt||[]).find(function(x){ return x.id===pr[1]; });
       if(r)DW.d=r.d; COS_TAB='dwt';
@@ -51166,6 +51170,38 @@ function cosTaskTab(body){
                 lu?lu.t:'',r.status||'',[r.sub,r.ref].filter(Boolean).join(' \u00b7 ')];
       }));
   };
+}
+
+/* ---------- the status, changed right on the register — whichever sheet the line lives on ---------- */
+function taskStatusCell(r){
+  if(!cosCanEdit())return pill(r.status||'Open');
+  var opts, cur=r.status||'Open';
+  if(r.src==='task')opts=COS_STATUS;
+  else if(r.src==='mom'){ opts=COS_MOMSTAT; if(cur==='Completed')cur='Closed'; }
+  else {
+    var raw=r.raw||{};
+    if(typeof dwtLocked==='function'&&dwtLocked(raw.d))return pill(r.status||'Open')+'<div style="font-size:.64rem;color:#8a6d1a">\uD83D\uDD12 day locked</div>';
+    opts=DWT_STATUS; if(cur==='Completed')cur='Done';
+  }
+  return '<select data-tst="'+E(r.src)+'|'+E(r.id)+'" style="max-width:130px;font-size:.74rem;padding:4px 6px">'+selOpts(opts,cur,'')+'</select>';
+}
+function taskSetStatus(src,id,v){
+  if(!cosNeedEdit())return;
+  if(src==='task'){
+    var t=(COS.tasks||[]).find(function(x){ return x.id===id; }); if(!t)return;
+    t.status=v; t._u=nowMs();
+    if(!Array.isArray(t.updates))t.updates=[];
+    t.updates.push({d:today(),t:'Status \u2192 '+v,by:(COSU&&COSU.name)||''});
+  }else if(src==='mom'){
+    var pr=id.split('|'), m=(COS.mom||[]).find(function(x){ return x.id===pr[0]; }); if(!m)return;
+    var p=(m.points||[]).find(function(x){ return x.id===pr.slice(1).join('|'); }); if(!p)return;
+    p.status=v; m._u=nowMs();
+  }else{
+    var r=(COS.dwt||[]).find(function(x){ return x.id===id; }); if(!r)return;
+    if(typeof dwtLocked==='function'&&dwtLocked(r.d)){ T('\uD83D\uDD12 '+dShort(r.d)+' is locked.'); cosPaint(); return; }
+    r.status=v; r._u=nowMs();
+  }
+  cosSave(); cosPaint(); T('\u2705 Status \u2192 '+v);
 }
 
 /* ---------- add / edit one task ---------- */
@@ -51297,7 +51333,10 @@ function taskPrint(list){
    One screen for the day: what is due today, what is late, what was
    opened or moved today. Status changes and the day's update go in
    straight from here.                                                  */
-var CD={day:'',poc:'',proj:''};
+var CD={day:'',poc:'',proj:'',stat:''};
+/* the status words differ sheet to sheet — one filter reads them all */
+function cdStNorm(st){ st=String(st||'Open'); if(st==='Closed'||st==='Done')return 'Completed'; return st; }
+function cdStOk(st){ if(!CD.stat)return true; return cdStNorm(st)===CD.stat; }
 
 function cdDay(){ return CD.day||today(); }
 function cdBuckets(){
@@ -51305,6 +51344,7 @@ function cdBuckets(){
   (COS.tasks||[]).forEach(function(t){
     if(CD.poc&&t.poc!==CD.poc)return;
     if(CD.proj&&t.project!==CD.proj)return;
+    if(!cdStOk(t.status))return;
     var closed=(t.status==='Completed'||t.status==='Cancelled');
     var touchedToday=(t.updates||[]).some(function(u){ return u.d===D; });
     if(closed){
@@ -51332,7 +51372,8 @@ function cdMomItems(D){
     (m.points||[]).forEach(function(p0){
       var p=(typeof momPt==='function')?momPt(p0):p0;
       if(!String(p.agenda||'').trim()&&!String(p.action||'').trim())return;
-      if(p.status==='Closed'||p.status==='Completed'||p.status==='Cancelled')return;
+      if(!CD.stat&&(p.status==='Closed'||p.status==='Completed'||p.status==='Cancelled'))return;
+      if(!cdStOk(p.status))return;
       if(CD.poc&&String(p.by||'')!==CD.poc)return;
       var iso=(typeof momDate==='function')?momDate(p.due):'';
       if(!iso)return;                                   /* "Immediate", "3 times/month" — no day to sit on */
@@ -51354,6 +51395,7 @@ function cdDailyItems(D){
     if(!String(r.work||'').trim())return;
     if(CD.proj&&String(r.proj||'')!==CD.proj)return;
     if(CD.poc&&String(r.by||'')!==CD.poc)return;
+    if(!cdStOk(r.status))return;
     out.push(r);
   });
   return out;
@@ -51374,9 +51416,8 @@ function cdDailyRow(r){
       ((r.tgt&&r.tgt<cdDay()&&r.status!=='Done'&&r.status!=='Cancelled')?'<div style="font-size:.68rem;color:#b02a2a;font-weight:700">overdue</div>':'')+'</td>'+
     '<td>'+pill(r.status||'Open')+'</td>'+
     '<td style="white-space:nowrap;text-align:right">'+
-      (cosCanEdit()?('<button class="g" data-cddg="'+E(r.id)+'" title="Open the daily sheet">\uD83D\uDCD6</button> '+
-        ((done||dwtLocked(r.d))?(dwtLocked(r.d)?'<span style="font-size:.68rem;color:#8a5b12">\uD83D\uDD12</span>':'')
-          :'<button class="g" data-cddd="'+E(r.id)+'" title="Mark done" style="background:#e8f7ed;border-color:#c6e8d3;color:#1c7a42">\u2714</button>')):'')+
+      '<button class="g" data-cddg="'+E(r.id)+'" title="Open the daily sheet">\uD83D\uDCD6</button>'+
+      (dwtLocked(r.d)?' <span style="font-size:.68rem;color:#8a5b12">\uD83D\uDD12</span>':'')+
     '</td></tr>';
 }
 /* one row of the day's table — a MOM action point */
@@ -51397,13 +51438,8 @@ function cdMomRow(x){
       (days?('<div style="font-size:.68rem;color:#b02a2a;font-weight:700">'+days+' day'+(days===1?'':'s')+' late</div>'):'')+'</td>'+
     '<td>'+pill(p.status||'Open')+'</td>'+
     '<td style="white-space:nowrap;text-align:right">'+
-      (cosCanEdit()?(
-        '<button class="g" data-cdmv="'+E(m.id)+'" title="Open the MOM">\uD83D\uDCD6</button> '+
-        (m.locked?'':('<button class="g" data-cdmr="'+E(m.id)+'|'+E(p.id)+'" title="Move the target date">\uD83D\uDCC5</button> '+
-                      '<button class="g" data-cdmt="'+E(m.id)+'|'+E(p.id)+'" title="Make it a task">\u2795</button> '+
-                      '<button class="g" data-cdmd="'+E(m.id)+'|'+E(p.id)+'" title="Mark done" style="background:#e8f7ed;border-color:#c6e8d3;color:#1c7a42">\u2714</button>'))+
-        (m.locked?'<span style="font-size:.68rem;color:#8a5b12">\uD83D\uDD12</span>':'')
-      ):'')+
+      '<button class="g" data-cdmv="'+E(m.id)+'" title="Open the MOM">\uD83D\uDCD6</button>'+
+      (m.locked?' <span style="font-size:.68rem;color:#8a5b12">\uD83D\uDD12</span>':'')+
     '</td></tr>';
 }
 /* one row of the day's table — a task from the register */
@@ -51426,12 +51462,7 @@ function cdRow(t){
     '<td>'+pill(t.priority||'Normal')+pill(t.status||'Open')+
       (lu&&!mine.length?('<div style="font-size:.68rem;color:#8798ab;margin-top:2px;white-space:pre-wrap">last: '+E(lu.t)+'</div>'):'')+'</td>'+
     '<td style="white-space:nowrap;text-align:right">'+
-      (cosCanEdit()?(
-        '<button class="g" data-cdu="'+E(t.id)+'" title="Today\u2019s update">\uD83D\uDCAC</button> '+
-        '<button class="g" data-cds="'+E(t.id)+'" data-v="In Progress" title="In progress">\u25B6</button> '+
-        '<button class="g" data-cds="'+E(t.id)+'" data-v="On Hold" title="On hold">\u23F8</button> '+
-        '<button class="g" data-cds="'+E(t.id)+'" data-v="Completed" title="Completed" style="background:#e8f7ed;border-color:#c6e8d3;color:#1c7a42">\u2714</button>'
-      ):'')+
+      '<button class="g" data-cdgo="'+E(t.id)+'" title="Open on the Tasks register">\uD83D\uDCD6</button>'+
     '</td></tr>';
 }
 function cdChip(src){
@@ -51477,6 +51508,7 @@ function cosTodayTab(body){
     if(!(r.tgt&&String(r.tgt)<D))return;
     if(CD.proj&&String(r.proj||'')!==CD.proj)return;
     if(CD.poc&&String(r.by||'')!==CD.poc)return;
+    if(!cdStOk(r.status))return;
     var k=String(r.work||'').trim().toLowerCase()+'|'+String(r.proj||'');
     if(have[k])return; have[k]=1; dlLate.push(r);
   });
@@ -51489,12 +51521,13 @@ function cosTodayTab(body){
       '<input type="date" id="cdD" value="'+E(D)+'" style="width:150px">'+
       '<button class="g" id="cdNext">Day ›</button>'+
       '<button class="g" id="cdToday">Today</button>'+
-      (cosCanEdit()?'<button class="p" id="cdNew">➕ New task</button>':'')+
+
       '<button class="g" id="cdPrint">🖨 Print</button>'+
     '</div><div class="cos-cb">'+
       '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">'+
         '<div><label class="fl">Project</label><select id="cdP">'+selOpts(cosProjects(),CD.proj,'All projects')+'</select></div>'+
         '<div><label class="fl">POC / Responsible</label><select id="cdC">'+selOpts(COS.lists.poc,CD.poc,'Everyone')+'</select></div>'+
+        '<div><label class="fl">Status</label><select id="cdS">'+selOpts(['Open','In Progress','On Hold','Completed','Cancelled'],CD.stat,'All')+'</select></div>'+
       '</div>'+
       '<div class="kpi" style="margin:13px 0 0">'+
         '<div class="b" style="border-left-color:#b02a2a"><div class="n">'+(B.late.length+M.late.length+dlLate.length)+'</div><div class="l">Overdue</div></div>'+
@@ -51520,6 +51553,7 @@ function cosTodayTab(body){
   q('#cdToday').onclick=function(){ CD.day=''; cosPaint(); };
   q('#cdP').addEventListener('change',function(){ CD.proj=this.value; cosPaint(); });
   q('#cdC').addEventListener('change',function(){ CD.poc=this.value; cosPaint(); });
+  q('#cdS').addEventListener('change',function(){ CD.stat=this.value; cosPaint(); });
   if(q('#cdNew'))q('#cdNew').onclick=function(){
     var host=q('#cdForm');
     host.innerHTML='<div style="border:1.5px solid #2c6fa8;border-radius:12px;padding:12px;background:#f8fbfe">'+
@@ -51552,6 +51586,7 @@ function cosTodayTab(body){
     };
   };
   body.querySelectorAll('[data-cdu]').forEach(function(b){ b.onclick=function(){ taskUpdate(b.dataset.cdu); }; });
+  body.querySelectorAll('[data-cdgo]').forEach(function(b){ b.onclick=function(){ TF.q=''; TF.src='task'; COS_TAB='tasks'; cosPaint(); try{ document.getElementById('cosOv').scrollTop=0; }catch(e){} }; });
   body.querySelectorAll('[data-cds]').forEach(function(b){ b.onclick=function(){
     if(!cosNeedEdit())return;
     var t=(COS.tasks||[]).find(function(x){ return x.id===b.dataset.cds; }); if(!t)return;
@@ -52582,14 +52617,19 @@ function payOpen(p){ return p.status!=='Paid'&&p.status!=='Rejected'; }
 function payAge(p){ return p.date?Math.max(0,daysBetween(p.date,today())):0; }
 
 /* ---------- the payable ledger, read from Finance ---------- */
+var PL_OPEN={}, PL_KPI='';
+function plKpi(k,color,val,label){ var on=PL_KPI===k;
+  return '<div class="b" data-plk="'+k+'" style="border-left-color:'+color+';cursor:pointer'+(on?';background:#eaf1f8;box-shadow:inset 0 0 0 2px '+color:'')+'" title="Click for the lines behind this figure"><div class="n">'+val+'</div><div class="l">'+label+' '+(on?'\u25BE':'\u25B8')+'</div></div>'; }
 function payLedgerData(){ try{ return (typeof window.__finPayable==='function')?window.__finPayable():null; }catch(e){ return null; } }
 function payLedgerTable(list,label,total,cls){
   var R='text-align:right', B='text-align:right;font-weight:800';
   return '<table class="'+(cls||'cos-t')+'" style="width:100%"><thead><tr><th>'+E(label)+'</th><th style="'+R+';width:70px">Lines</th>'+
     '<th style="'+R+';width:140px">Bill Received</th><th style="'+R+';width:140px">Bill Paid</th><th style="'+R+';width:140px">Balance payable</th></tr></thead><tbody>'+
-    (list.length?list.map(function(x){ return '<tr><td><b>'+E(x.name)+'</b></td><td style="'+R+';color:#6d8199">'+x.n+'</td>'+
+    (list.length?list.map(function(x){ var canOpen=(label!=='Project'&&cls!==''), open=canOpen&&PL_OPEN[x.name.toLowerCase()];
+      return '<tr'+(canOpen?(' data-plv="'+E(x.name)+'" style="cursor:pointer" title="Click for the detail"'):'')+'><td>'+(canOpen?('<span style="display:inline-block;width:16px;color:#6d8199">'+(open?'\u25BE':'\u25B8')+'</span>'):'')+'<b>'+E(x.name)+'</b></td><td style="'+R+';color:#6d8199">'+x.n+'</td>'+
       '<td style="'+R+';color:#1c7a42;font-weight:700">'+money(x.rec)+'</td><td style="'+R+';color:#b02a2a;font-weight:700">'+money(x.paid)+'</td>'+
-      '<td style="'+B+(x.bal<0?';color:#b02a2a':'')+'">'+money(x.bal)+'</td></tr>'; }).join('')
+      '<td style="'+B+(x.bal<0?';color:#b02a2a':'')+'">'+money(x.bal)+'</td></tr>'+
+      (open?('<tr class="exp"><td colspan="5" style="padding:0;background:#fbfdff">'+((typeof window.__finVendorDetail==='function')?window.__finVendorDetail(x.name):'')+'</td></tr>'):''); }).join('')
       :'<tr><td colspan="5" class="empty">Nothing in Finance yet.</td></tr>')+
     (list.length?('<tr><td style="font-weight:800;background:#f2f5f8">TOTAL</td><td style="'+R+';background:#f2f5f8;font-weight:700">'+total.lines+'</td>'+
       '<td style="'+B+';background:#f2f5f8;color:#1c7a42">'+money(total.tot.rec)+'</td><td style="'+B+';background:#f2f5f8;color:#b02a2a">'+money(total.tot.paid)+'</td>'+
@@ -52604,10 +52644,12 @@ function payLedgerCard(){
       '<button class="g" id="cosPlOpen">Open Finance</button><button class="p" id="cosPlPrint">\uD83D\uDDA8 Print ledger</button></div>'+
     '<div class="cos-cb">'+
       (d?('<div class="kpi" style="margin-bottom:12px">'+
-        '<div class="b" style="border-left-color:#1c7a42"><div class="n">Rs '+money(d.tot.rec)+'</div><div class="l">Bills received</div></div>'+
-        '<div class="b" style="border-left-color:#b02a2a"><div class="n">Rs '+money(d.tot.paid)+'</div><div class="l">Bills paid</div></div>'+
-        '<div class="b" style="border-left-color:#1d5a8f"><div class="n">Rs '+money(d.tot.bal)+'</div><div class="l">Total payable</div></div>'+
-        '<div class="b" style="border-left-color:#5b47a0"><div class="n">'+d.byVendor.length+'</div><div class="l">Vendors</div></div></div>'+
+        plKpi('rec','#1c7a42','Rs '+money(d.tot.rec),'Bills received')+
+        plKpi('paid','#b02a2a','Rs '+money(d.tot.paid),'Bills paid')+
+        plKpi('all','#1d5a8f','Rs '+money(d.tot.bal),'Total payable')+
+        plKpi('ven','#5b47a0',String(d.byVendor.length),'Vendors')+'</div>'+
+        (PL_KPI?('<div class="cos-tw" style="margin-bottom:12px"><div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:#f2f5f8"><b style="font-size:.78rem;color:#12283f">'+(PL_KPI==='rec'?'\uD83D\uDCE5 Bills received':PL_KPI==='paid'?'\uD83D\uDCE4 Bills paid':'\uD83D\uDCC4 Every line')+'</b><span class="sp"></span><button class="g" id="cosPlKx">\u2715 Close</button></div>'+
+          ((typeof window.__finLinesDetail==='function')?window.__finLinesDetail(PL_KPI==='ven'?'all':PL_KPI):'')+'</div>'):'')+
         '<div class="cos-tw">'+payLedgerTable(d.byVendor,'Contractor / Vendor',d)+'</div>'+
         '<div style="font-size:.74rem;font-weight:800;color:#12283f;margin:14px 0 6px">\uD83C\uDFD7 By project</div>'+
         '<div class="cos-tw">'+payLedgerTable(d.byProject,'Project',d)+'</div>')
@@ -52702,6 +52744,13 @@ function cosPayTab(body){
   }; });
   body.querySelector('#pyPrint').onclick=function(){ payPrint(list); };
   if(body.querySelector('#cosPlPrint'))body.querySelector('#cosPlPrint').onclick=function(){ payLedgerPrint(); };
+  body.querySelectorAll('[data-plk]').forEach(function(b){ b.addEventListener('click',function(){ var k=b.dataset.plk; PL_KPI=(PL_KPI===k)?'':k; cosPaint(); }); });
+  if(body.querySelector('#cosPlKx'))body.querySelector('#cosPlKx').onclick=function(){ PL_KPI=''; cosPaint(); };
+  body.querySelectorAll('tr[data-plv]').forEach(function(tr){ tr.addEventListener('click',function(e){
+    if(e.target.closest('button'))return;
+    var k=tr.dataset.plv.toLowerCase(); if(PL_OPEN[k])delete PL_OPEN[k]; else PL_OPEN[k]=1; cosPaint();
+    try{ var el=document.querySelector('tr[data-plv="'+CSS.escape(tr.dataset.plv)+'"]'); if(el)el.scrollIntoView({block:'center'}); }catch(x){}
+  }); });
   if(body.querySelector('#cosPlOpen'))body.querySelector('#cosPlOpen').onclick=function(){ try{ window.openFinance&&window.openFinance(); }catch(e){} };
   body.querySelector('#pyCsv').onclick=function(){
     cosCsv('COS_Payment_Issues_'+today()+'.csv',
@@ -53067,7 +53116,7 @@ function dwtCarry(d,quiet){
     if(!String(r.work||'').trim())return;
     if(have[k])return;
     have[k]=1;
-    dwtAll().push({id:uid('w_'),d:d,work:r.work,proj:r.proj||'',by:r.by||'',note:r.note||'',tgt:r.tgt||'',
+    dwtAll().push({id:uid('w_'),d:d,work:r.work,proj:r.proj||'',by:r.by||'',note:r.note||'',tgt:r.tgt||'',prio:r.prio||'Normal',
       status:(r.status==='Done'?'Open':(r.status||'Open')),raised:r.raised||prev,
       carried:1,ord:ord++,by2:(COSU&&COSU.name)||'',_u:nowMs()});
     n++;
@@ -53176,6 +53225,7 @@ function cosDwtTab(body){
       '<th style="min-width:240px">Work / To Do</th>'+
       '<th style="width:150px">Project</th>'+
       '<th style="width:130px">Responsible</th>'+      '<th style="width:130px">Target Date</th>'+
+      '<th style="width:100px">Priority</th>'+
       '<th style="width:140px">Status</th>'+
       '<th style="min-width:170px">Remarks</th>'+
       '<th style="width:110px">Since</th>'+
@@ -53195,6 +53245,8 @@ function cosDwtTab(body){
           '<td>'+(ed?('<input type="date" data-w="tgt" value="'+E(r.tgt||'')+'" style="width:100%">')
                    :(r.tgt?E(dShort(r.tgt)):'\u2014'))+
             (r.tgt&&!DWT_DONE[r.status]&&r.tgt<d?('<div style="font-size:.66rem;color:#b02a2a;font-weight:700">overdue</div>'):'')+'</td>'+
+          '<td>'+(ed?('<select data-w="prio">'+selOpts(COS_PRIOR,r.prio||'Normal','')+'</select>')
+                   :pill(r.prio||'Normal'))+'</td>'+
           '<td>'+(ed?('<select data-w="status">'+selOpts(DWT_STATUS,r.status||'Open','')+'</select>')
                    :pill(r.status||'Open'))+'</td>'+
           '<td>'+(ed?('<textarea data-w="note" placeholder="remarks">'+E(r.note||'')+'</textarea>')
@@ -53252,7 +53304,7 @@ function cosDwtTab(body){
         var r=rec(); if(!r)return;
         r[el.dataset.w]=el.value; r._u=nowMs();
         cosSave();
-        if(el.dataset.w==='status')cosPaint();     /* the colour and the counters follow */
+        if(el.dataset.w==='status'||el.dataset.w==='prio')cosPaint();     /* the colour and the counters follow */
       });
     });
     var x=tr.querySelector('[data-wdel]');
@@ -53271,13 +53323,13 @@ function dwtPrint(d,rows){
   var head='<h2 style="margin:0 0 3px">Daily Work To Do</h2>'+
     '<div style="font-size:.85rem;color:#4a5f75;margin-bottom:10px">'+E(dLong(d))+'</div>';
   var t='<table><thead><tr>'+
-    ['S.#','Work / To Do','Project','Responsible','Target Date','Status','Remarks','First raised']
+    ['S.#','Work / To Do','Project','Responsible','Target Date','Priority','Status','Remarks','First raised']
       .map(function(h){ return '<th>'+h+'</th>'; }).join('')+'</tr></thead><tbody>'+
     (rows.length?rows.map(function(r,i){
       return '<tr><td>'+(i+1)+'</td><td>'+E(r.work||'')+'</td><td>'+E(r.proj||'')+'</td>'+
-        '<td>'+E(r.by||'')+'</td><td>'+E(r.tgt?dShort(r.tgt):'')+'</td><td>'+E(r.status||'Open')+'</td><td>'+E(r.note||'')+'</td>'+
+        '<td>'+E(r.by||'')+'</td><td>'+E(r.tgt?dShort(r.tgt):'')+'</td><td>'+E(r.prio||'Normal')+'</td><td>'+E(r.status||'Open')+'</td><td>'+E(r.note||'')+'</td>'+
         '<td>'+E(r.raised&&r.raised!==d?dShort(r.raised):'today')+'</td></tr>';
-    }).join(''):'<tr><td colspan="8" style="text-align:center;color:#8798ab">Nothing on this day</td></tr>')+
+    }).join(''):'<tr><td colspan="9" style="text-align:center;color:#8798ab">Nothing on this day</td></tr>')+
     '</tbody></table>';
   cosPrint('Daily Work To Do — '+dShort(d),head+t,true);
 }
@@ -57226,6 +57278,13 @@ function finOpen(){
 function finClose(){ var ov=document.getElementById('finOv'); if(ov)ov.remove(); }
 window.openFinance=finOpen;
 /* the payable ledger for other modules (COS Data ▸ Payment issues): vendor by vendor, project by project */
+window.__finVendorDetail=function(name){
+  var st=FIN||finLoadLocal(); if(!st)return '';
+  var nm=String(name||'').trim().toLowerCase();
+  var rows=(st.rows||[]).filter(function(r){ return !r._del&&String(r.vendor||'').trim().toLowerCase()===nm; });
+  var keep=FIN; FIN=st;
+  try{ return finVendorDetail({name:name,rows:rows}); }catch(e){ return ''; } finally{ FIN=keep; }
+};
 window.__finPayable=function(){
   var st=FIN; if(!st){ st=finLoadLocal(); if(!FIN)try{ finReady(function(){}); }catch(e){} }
   if(!st)return null;
@@ -57593,8 +57652,28 @@ function finVendorDetail(x){
     (rows.length?lineT:'<div class="empty" style="padding:10px">No Finance line yet.</div>')+'</div>';
 }
 
+/* ---- the lines behind a figure: every Finance line in a list, newest last, with totals ---- */
+function finLinesDetail(list,title){
+  var rows=(list||[]).filter(function(r){ return String(r.vendor||'').trim()||num(r.amount); }).slice().sort(rowSort), t=sumBy(rows);
+  var cell=function(v,st){ return '<td style="'+(st||'')+'">'+v+'</td>'; };
+  return '<div style="padding:10px 12px 14px;background:#f7fafd">'+
+    (title?('<div style="font-size:.74rem;font-weight:800;color:#12283f;margin:0 0 6px">'+title+' <span style="color:#6d8199;font-weight:600">\u00B7 '+rows.length+' line'+(rows.length===1?'':'s')+' \u00B7 received '+money(t.rec)+' \u00B7 paid '+money(t.paid)+' \u00B7 balance '+money(t.bal)+'</span></div>'):'')+
+    '<table class="cos-t" style="width:100%"><thead><tr><th style="width:50px">S.No</th><th style="width:80px">Date</th><th>Supplier / Vendor</th><th style="width:90px">Project</th><th style="width:90px">WO #</th><th style="width:100px">Diary No</th><th style="width:90px">Voucher #</th><th style="width:80px">Request No</th><th style="width:110px">IPC</th><th style="text-align:right;width:120px">Received</th><th style="text-align:right;width:120px">Paid</th><th style="width:100px">By</th></tr></thead><tbody>'+
+    (rows.length?rows.map(function(r){ return '<tr>'+cell(E(r._c||''),'color:#6d8199')+cell(E(dShort(r.date)))+cell('<b>'+E(r.vendor||'')+'</b>')+cell(E(r.project||''))+cell(E(r.wo||''))+cell(E(r.diary||''))+cell(E(r.voucher||''))+cell('<b>'+E(r.req||'')+'</b>')+cell(E(r.ipc||''))+
+        cell(r.status==='Paid'?'':money(r.amount),'text-align:right;color:#1c7a42;font-weight:700')+cell(r.status==='Paid'?money(r.amount):'','text-align:right;color:#b02a2a;font-weight:700')+cell(E(r.by||''))+'</tr>'; }).join('')
+      :'<tr><td colspan="12" class="empty" style="padding:10px">No line.</td></tr>')+
+    (rows.length?('<tr class="tot"><td colspan="9" style="font-weight:800">TOTAL</td><td style="text-align:right;color:#1c7a42;font-weight:800">'+money(t.rec)+'</td><td style="text-align:right;color:#b02a2a;font-weight:800">'+money(t.paid)+'</td><td></td></tr>'):'')+
+    '</tbody></table></div>';
+}
+/* kind: rec (bills received) · paid (bills paid) · all — over every Finance line, for the COS Pending Payments ledger */
+window.__finLinesDetail=function(kind){
+  var all=(FIN.rows||[]).filter(function(r){ return !r._del; });
+  var list=kind==='rec'?all.filter(function(r){ return r.status!=='Paid'; }):kind==='paid'?all.filter(function(r){ return r.status==='Paid'; }):all;
+  return finLinesDetail(list, kind==='rec'?'\uD83D\uDCE5 Bills received \u2014 every line':kind==='paid'?'\uD83D\uDCE4 Bills paid \u2014 every line':'\uD83D\uDCC4 Every line behind the balance');
+};
+
 /* ================= LEDGER ================= */
-var LF={from:'',to:'',proj:'',q:'',open:{}};
+var LF={from:'',to:'',proj:'',q:'',open:{},openP:{},kpi:''};
 function ledRows(){
   return (FIN.rows||[]).filter(function(r){
     if(LF.from&&String(r.date)<LF.from)return false; if(LF.to&&String(r.date)>LF.to)return false;
@@ -57618,11 +57697,20 @@ function finLedTab(body){
   var rng=(LF.from||LF.to)?((LF.from?dShort(LF.from):'start')+' to '+(LF.to?dShort(LF.to):'today')):'all dates';
   var venTr=byV.map(function(x){
     var open=LF.open[x.name];
-    return '<tr><td><button class="g" data-ledx="'+E(x.name)+'" style="padding:2px 7px;margin-right:6px">'+(open?'▾':'▸')+'</button><b>'+E(x.name)+'</b></td>'+
+    return '<tr data-ledv="'+E(x.name)+'" style="cursor:pointer" title="Click the name or any amount for the detail"><td><button class="g" data-ledx="'+E(x.name)+'" style="padding:2px 7px;margin-right:6px">'+(open?'▾':'▸')+'</button><b>'+E(x.name)+'</b></td>'+
       '<td style="text-align:right" class="rec">'+money(x.rec)+'</td><td style="text-align:right" class="pay">'+money(x.paid)+'</td>'+
       '<td style="text-align:right;font-weight:800'+(x.bal<0?';color:#b02a2a':'')+'">'+money(x.bal)+'</td><td style="text-align:right;color:#6d8199">'+x.n+'</td></tr>'+
       (open?('<tr class="exp"><td colspan="5">'+finVendorDetail(x)+'</td></tr>'):'');
   }).join('');
+  var kpiTile=function(k,color,val,label){ var on=LF.kpi===k;
+    return '<div class="b" data-ledk="'+k+'" style="border-left-color:'+color+';cursor:pointer'+(on?';background:#eaf1f8;box-shadow:inset 0 0 0 2px '+color:'')+'" title="Click for the lines behind this figure"><div class="n'+(k==='rec'?' rec':k==='paid'?' pay':'')+'">'+val+'</div><div class="l">'+label+' '+(on?'\u25BE':'\u25B8')+'</div></div>'; };
+  var kpiDetail='';
+  if(LF.kpi){
+    var kl=LF.kpi==='rec'?rows.filter(function(r){ return r.status!=='Paid'; }):LF.kpi==='paid'?rows.filter(function(r){ return r.status==='Paid'; }):rows;
+    var kt=LF.kpi==='rec'?'\uD83D\uDCE5 Bills received':LF.kpi==='paid'?'\uD83D\uDCE4 Bills paid':LF.kpi==='bal'?'\uD83D\uDCC4 Balance payable \u2014 every line':'\uD83C\uDFE2 Vendors \u2014 every line';
+    kpiDetail='<div class="cos-card"><div class="cos-ch"><h3>'+kt+'</h3><span class="hint">'+E(rng)+' \u2014 the lines behind the figure</span><span class="sp"></span><button class="g" id="ldKx">\u2715 Close</button></div>'+
+      '<div class="cos-cb" style="padding:0"><div class="cos-tw" style="border:none;border-radius:0">'+finLinesDetail(kl,'')+'</div></div></div>';
+  }
   body.innerHTML=
     '<div class="cos-card"><div class="cos-ch"><h3>📒 Ledger</h3><span class="hint">bill received · bill paid · balance, vendor by vendor — '+E(rng)+'</span><span class="sp"></span>'+
       '<button class="g" id="ldXl">⬇ Excel</button><button class="g" id="ldCsv">⬇ CSV</button><button class="g" id="ldPrint">🖨 Print</button></div>'+
@@ -57634,27 +57722,34 @@ function finLedTab(body){
       '<div style="display:flex;align-items:flex-end"><button class="g" id="ldC" style="width:100%">Clear</button></div>'+
     '</div></div></div>'+
     '<div class="kpi">'+
-      '<div class="b" style="border-left-color:#1c7a42"><div class="n rec">Rs '+money(tot.rec)+'</div><div class="l">Bills received</div></div>'+
-      '<div class="b" style="border-left-color:#b02a2a"><div class="n pay">Rs '+money(tot.paid)+'</div><div class="l">Bills paid</div></div>'+
-      '<div class="b" style="border-left-color:#1d5a8f"><div class="n">Rs '+money(tot.bal)+'</div><div class="l">Balance payable</div></div>'+
-      '<div class="b" style="border-left-color:#5b47a0"><div class="n">'+byV.length+'</div><div class="l">Vendors</div></div>'+
-    '</div>'+
-    '<div class="cos-card"><div class="cos-ch"><h3>🏢 Supplier / Vendor</h3><span class="hint">click ▸ to see the lines behind a figure</span></div><div class="cos-cb" style="padding:0">'+
+      kpiTile('rec','#1c7a42','Rs '+money(tot.rec),'Bills received')+
+      kpiTile('paid','#b02a2a','Rs '+money(tot.paid),'Bills paid')+
+      kpiTile('bal','#1d5a8f','Rs '+money(tot.bal),'Balance payable')+
+      kpiTile('ven','#5b47a0',String(byV.length),'Vendors')+
+    '</div>'+kpiDetail+
+    '<div class="cos-card"><div class="cos-ch"><h3>🏢 Supplier / Vendor</h3><span class="hint">click a vendor, or any amount, to see the lines behind the figure</span></div><div class="cos-cb" style="padding:0">'+
       '<div class="cos-tw" style="border:none;border-radius:0"><table class="cos-t"><thead><tr><th>Supplier / Vendor</th><th style="text-align:right;width:150px">Bill Received</th><th style="text-align:right;width:150px">Bill Paid</th><th style="text-align:right;width:150px">Balance</th><th style="text-align:right;width:70px">Lines</th></tr></thead><tbody>'+
       (venTr||'<tr><td colspan="5" class="empty">Nothing in this range.</td></tr>')+
       (byV.length?('<tr class="tot"><td>TOTAL</td><td style="text-align:right" class="rec">'+money(tot.rec)+'</td><td style="text-align:right" class="pay">'+money(tot.paid)+'</td><td style="text-align:right">'+money(tot.bal)+'</td><td style="text-align:right">'+byV.reduce(function(s,x){ return s+x.n; },0)+'</td></tr>'):'')+
       '</tbody></table></div></div></div>'+
     '<div class="cos-card"><div class="cos-ch"><h3>🏗 By project</h3></div><div class="cos-cb" style="padding:0">'+
       '<div class="cos-tw" style="border:none;border-radius:0"><table class="cos-t"><thead><tr><th>Project</th><th style="text-align:right;width:150px">Bill Received</th><th style="text-align:right;width:150px">Bill Paid</th><th style="text-align:right;width:150px">Balance</th><th style="text-align:right;width:70px">Lines</th></tr></thead><tbody>'+
-      (byP.length?byP.map(function(x){ return '<tr><td><b>'+E(x.name)+'</b></td><td style="text-align:right" class="rec">'+money(x.rec)+'</td><td style="text-align:right" class="pay">'+money(x.paid)+'</td><td style="text-align:right;font-weight:800">'+money(x.bal)+'</td><td style="text-align:right;color:#6d8199">'+x.n+'</td></tr>'; }).join(''):'<tr><td colspan="5" class="empty">Nothing in this range.</td></tr>')+
+      (byP.length?byP.map(function(x){ var op=LF.openP[x.name]; return '<tr data-ledp="'+E(x.name)+'" style="cursor:pointer" title="Click for the lines of this project"><td><span style="display:inline-block;width:16px;color:#6d8199">'+(op?'\u25BE':'\u25B8')+'</span><b>'+E(x.name)+'</b></td><td style="text-align:right" class="rec">'+money(x.rec)+'</td><td style="text-align:right" class="pay">'+money(x.paid)+'</td><td style="text-align:right;font-weight:800">'+money(x.bal)+'</td><td style="text-align:right;color:#6d8199">'+x.n+'</td></tr>'+
+        (op?('<tr class="exp"><td colspan="5" style="padding:0">'+finLinesDetail(x.rows,'\uD83C\uDFD7 '+E(x.name))+'</td></tr>'):''); }).join(''):'<tr><td colspan="5" class="empty">Nothing in this range.</td></tr>')+
       '</tbody></table></div></div></div>';
   var q=function(s){ return body.querySelector(s); };
   q('#ldF').addEventListener('change',function(){ LF.from=this.value; finPaint(); });
   q('#ldT').addEventListener('change',function(){ LF.to=this.value; finPaint(); });
   q('#ldP').addEventListener('change',function(){ LF.proj=this.value; finPaint(); });
   q('#ldQ').addEventListener('input',function(){ LF.q=this.value; clearTimeout(finLedTab._t); finLedTab._t=setTimeout(finPaint,260); });
-  q('#ldC').onclick=function(){ LF={from:'',to:'',proj:'',q:'',open:{}}; finPaint(); };
-  body.querySelectorAll('[data-ledx]').forEach(function(b){ b.onclick=function(){ var k=b.dataset.ledx; if(LF.open[k])delete LF.open[k]; else LF.open[k]=1; finPaint(); }; });
+  q('#ldC').onclick=function(){ LF={from:'',to:'',proj:'',q:'',open:{},openP:{},kpi:''}; finPaint(); };
+  var ledToggle=function(k){ if(LF.open[k])delete LF.open[k]; else LF.open[k]=1; finPaint();
+    try{ var el=body.querySelector('tr[data-ledv="'+CSS.escape(k)+'"]'); if(el)el.scrollIntoView({block:'nearest'}); }catch(x){} };
+  body.querySelectorAll('[data-ledx]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); ledToggle(b.dataset.ledx); }; });
+  body.querySelectorAll('tr[data-ledv]').forEach(function(tr){ tr.addEventListener('click',function(e){ if(e.target.closest('button,a,input,select'))return; ledToggle(tr.dataset.ledv); }); });
+  body.querySelectorAll('tr[data-ledp]').forEach(function(tr){ tr.addEventListener('click',function(){ var k=tr.dataset.ledp; if(LF.openP[k])delete LF.openP[k]; else LF.openP[k]=1; finPaint(); }); });
+  body.querySelectorAll('[data-ledk]').forEach(function(b){ b.addEventListener('click',function(){ var k=b.dataset.ledk; LF.kpi=(LF.kpi===k)?'':k; finPaint(); }); });
+  if(q('#ldKx'))q('#ldKx').onclick=function(){ LF.kpi=''; finPaint(); };
   q('#ldCsv').onclick=function(){ K().csv('Finance_Ledger_'+today()+'.csv',['Supplier / Vendor','Bill Received','Bill Paid','Balance','Lines'],
     byV.map(function(x){ return [x.name,x.rec,x.paid,x.bal,x.n]; }).concat([['TOTAL',tot.rec,tot.paid,tot.bal,rows.length]])); };
   q('#ldXl').onclick=function(){ finExcel(rows,''); };
