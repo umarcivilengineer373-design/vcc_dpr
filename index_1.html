@@ -32987,18 +32987,21 @@ async function procImportFile(f,replaceAll,onlyKind){
       /* a document line is the same line when its own numbers match — the register is
          joined with the sheet, not replaced by it, so a partial export (this month only)
          never wipes the earlier months and a second import of the same file changes nothing */
-      var idOf=function(r){
+      var baseOf=function(r){
         var k=function(v){ return pcKey(v); };
-        if(kind==='prdr')return ['pr',k(r.type),k(r.pr),k(r.year),k(r.sno),k(r.item),k(r.proj)].join('|');
-        if(kind==='po')  return ['po',k(r.po),k(r.year),k(r.sno),k(r.item),k(r.proj)].join('|');
-        if(kind==='igp') return ['igp',k(r.igp),k(r.year),k(r.poSno),k(r.item),k(r.po),k(r.proj)].join('|');
-        return ['grn',k(r.grn),k(r.year),k(r.igp),k(r.item),k(r.proj)].join('|');
+        var y=pcStr(r.year)||pcFY(r.prDate||r.poDate||r.igpDate||r.grnDate);
+        if(kind==='prdr')return ['pr',k(r.pr),k(y),k(r.item),k(r.proj)].join('|');
+        if(kind==='po')  return ['po',k(r.po),k(y),k(r.item),k(r.proj)].join('|');
+        if(kind==='igp') return ['igp',k(r.igp),k(y),k(r.item),k(r.po),k(r.proj)].join('|');
+        return ['grn',k(r.grn),k(y),k(r.igp),k(r.item),k(r.proj)].join('|');
       };
+      /* the n-th line of the same item on the same document keeps its own place */
+      var occ={}, idOf=function(r){ var b=baseOf(r); occ[b]=(occ[b]||0)+1; return b+'#'+occ[b]; };
       if(replaceAll||!(P[kind]||[]).length){ P[kind]=clean; added[kind]=clean.length; }
       else{
         var cur=P[kind].slice(), at={}, dupIn={}, nNew=0, nUpd=0, out=[];
-        cur.forEach(function(r,i){ var id=idOf(r); if(at[id]==null)at[id]=i; });
-        clean.forEach(function(r){
+        occ={}; cur.forEach(function(r,i){ var id=idOf(r); if(at[id]==null)at[id]=i; });
+        occ={}; clean.forEach(function(r){
           var id=idOf(r);
           if(dupIn[id])return; dupIn[id]=1;                 /* the sheet itself repeats a line */
           if(at[id]!=null){ var o=cur[at[id]]; var same=false; try{ same=JSON.stringify(o._raw||{})===JSON.stringify(r._raw||{}); }catch(e){}
@@ -34260,14 +34263,20 @@ function procPrHTML(){
       '<td style="font-size:.74rem">'+esc(r.by||'')+'</td>'+
       '<td style="font-size:.74rem">'+esc(r.status||'')+'</td></tr>';
   }).join('');
+  if(body){
+    var tq=0, to=0, prs={};
+    rows.forEach(function(r){ tq+=(+r.qty||0); to+=(+r.ordQty||0); prs[pcKey(r.proj)+'|'+pcStr(r.year)+'|'+pcKey(r.pr)]=1; });
+    body+='<tr style="background:#f2f5f8;font-weight:700"><td colspan="7" style="text-align:right">TOTAL — '+Object.keys(prs).length+' PR(s) · '+rows.length+' line(s)</td>'+
+      '<td class="num">'+fmt(tq)+'</td><td class="num">'+fmt(to)+'</td><td colspan="3"></td></tr>';
+  }
   return pcTable(['#','Project','PR #','PR Date','Item','Group','Unit','Req Qty','Ordered','Required','By','Status'],body,
     ['center','left','left','left','left','left','center','right','right','left','left','left']);
 }
 function procPoHTML(){
   var P=procState();
   var rows=pcApply((P.po||[]).map(function(r){return Object.assign({},r,{poAmt:r.total||r.value||0,grnVal:0,status:''})}),['item','po','pr','vendor','group']);
-  var t=0;
-  var body=rows.map(function(r,i){ t+=(+r.total||0);
+  var t=0, tq=0, tv=0, td=0, tx=0, pos={};
+  var body=rows.map(function(r,i){ t+=(+r.total||0); tq+=(+r.qty||0); tv+=(+r.value||0); td+=(+r.discV||0); tx+=(+r.taxV||0); pos[pcKey(r.proj)+'|'+pcStr(r.year)+'|'+pcKey(r.po)]=1;
     return '<tr><td class="dim" style="text-align:center">'+(i+1)+'</td>'+
       '<td style="font-size:.74rem">'+esc(r.proj)+'</td>'+
       '<td><b>'+esc(r.po)+'</b></td><td style="white-space:nowrap;font-size:.74rem">'+pcFmtD(r.poDate)+'</td>'+
@@ -34279,7 +34288,9 @@ function procPoHTML(){
       '<td style="white-space:nowrap;font-size:.72rem">'+pcFmtD(r.delDate)+'</td>'+
       '<td style="font-size:.74rem">'+esc(r.status||'')+'</td></tr>';
   }).join('');
-  if(body)body+='<tr style="background:#f2f5f8;font-weight:700"><td colspan="13" style="text-align:right">TOTAL</td><td class="num">'+woMoney(t)+'</td><td colspan="2"></td></tr>';
+  if(body)body+='<tr style="background:#f2f5f8;font-weight:700"><td colspan="8" style="text-align:right">TOTAL — '+Object.keys(pos).length+' PO(s) · '+rows.length+' line(s)</td>'+
+    '<td class="num">'+fmt(tq)+'</td><td></td><td class="num">'+woMoney(tv)+'</td><td class="num">'+woMoney(td)+'</td><td class="num">'+woMoney(tx)+'</td>'+
+    '<td class="num">'+woMoney(t)+'</td><td colspan="2"></td></tr>';
   return pcTable(['#','Project','PO #','PO Date','PR #','Vendor','Item','Group','Qty','Rate','Value','Discount','Sales Tax','Total','Delivery','Status'],body,
     ['center','left','left','left','left','left','left','left','right','right','right','right','right','right','left','left']);
 }
@@ -58597,19 +58608,45 @@ function finTile(){
 'use strict';
 function N(v){ try{ if(typeof stNum==='function')return stNum(v); }catch(e){} var n=parseFloat(String(v==null?'':v).replace(/,/g,'')); return isNaN(n)?0:n; }
 function K(v){ try{ if(typeof pcKey==='function')return pcKey(v); }catch(e){} return String(v==null?'':v).trim().toLowerCase().replace(/\s+/g,' '); }
+/* the ERP's SNo changes from one export to the next, so it is never part of the key:
+   a line is the same line when document, year, item and the required quantity match */
+function FY(d){ try{ if(typeof pcFY==='function')return pcFY(d); }catch(e){} return ''; }
 function procKey(kind,r){
-  var base;
-  if(kind==='prdr')     base=['pr',K(r.type),K(r.pr),K(r.year),K(r.sno),K(r.item),K(r.proj),K(r.prDate)];
-  else if(kind==='po')  base=['po',K(r.po),K(r.year),K(r.sno),K(r.item),K(r.proj),K(r.poDate)];
-  else if(kind==='igp') base=['igp',K(r.igp),K(r.year),K(r.poSno),K(r.item),K(r.po),K(r.proj),K(r.igpDate)];
-  else                  base=['grn',K(r.grn),K(r.year),K(r.igp),K(r.item),K(r.proj),K(r.grnDate),K(r.wh)];
-  /* the figures must match too — two real lines of the same item on one document differ somewhere */
-  return base.concat([N(r.qty),N(r.rate),N(r.value),N(r.total),N(r.ordQty)]).join('|');
+  var base, y=K(r.year)||K(FY(r.prDate||r.poDate||r.igpDate||r.grnDate));
+  if(kind==='prdr')     base=['pr',K(r.pr),y,K(r.item),K(r.proj),N(r.qty)];
+  else if(kind==='po')  base=['po',K(r.po),y,K(r.item),K(r.proj),N(r.qty),N(r.rate)];
+  else if(kind==='igp') base=['igp',K(r.igp),y,K(r.item),K(r.po),K(r.proj),N(r.qty)];
+  else                  base=['grn',K(r.grn),y,K(r.igp),K(r.item),K(r.proj),N(r.qty)];
+  return base.join('|');
 }
-function dedupe(arr,keyOf){
+function dedupe(arr,keyOf,keepLast){
   var seen={}, out=[];
+  if(keepLast){
+    var last={}; arr.forEach(function(r,i){ if(!r)return; var k=keyOf(r); if(k!=null)last[k]=i; });
+    arr.forEach(function(r,i){ if(!r)return; var k=keyOf(r); if(k==null||last[k]===i)out.push(r); });
+    return out;
+  }
   arr.forEach(function(r){ if(!r){ return; } var k=keyOf(r); if(k==null){ out.push(r); return; } if(seen[k])return; seen[k]=1; out.push(r); });
   return out;
+}
+/* Two passes over a register.
+   1. A line whose raw sheet row is byte-for-byte the same as another's is the same
+      line imported twice — only the last copy stays.
+   2. The ERP renumbers SNo on every export, so a re-import of the same document under
+      new SNo values used to add every line again — the whole register ends up
+      doubled or tripled. The usual group size (the mode) tells how many times that
+      happened; every group is brought down by that factor, so two genuine identical
+      lines on one document (the same item twice) survive as two. */
+function procClean(kind,arr){
+  var out=dedupe(arr,function(r){ if(!r._raw)return null; try{ return 'raw:'+JSON.stringify(r._raw); }catch(e){ return null; } },true);
+  var groups={}, order=[];
+  out.forEach(function(r,i){ var key=procKey(kind,r); if(!groups[key]){ groups[key]=[]; order.push(key); } groups[key].push(i); });
+  var sizes={}; order.forEach(function(key){ var n=groups[key].length; sizes[n]=(sizes[n]||0)+1; });
+  var mode=1, best=0; Object.keys(sizes).forEach(function(n){ if(sizes[n]>best||(sizes[n]===best&&+n>mode)){ best=sizes[n]; mode=+n; } });
+  if(mode<2)return out;
+  var drop={};
+  order.forEach(function(key){ var idx=groups[key], n=idx.length; if(n<2)return; var keep=Math.max(1,Math.round(n/mode)); for(var i=0;i<n-keep;i++)drop[idx[i]]=1; });
+  return out.filter(function(r,i){ return !drop[i]; });
 }
 function run(quiet){
   if(typeof S==='undefined'||!S)return 0;
@@ -58621,7 +58658,7 @@ function run(quiet){
     if(P&&typeof P==='object'){
       ['prdr','po','igp','grn'].forEach(function(k){
         var arr=P[k]; if(!Array.isArray(arr)||arr.length<2)return;
-        var out=dedupe(arr,function(r){ return procKey(k,r); });
+        var out=procClean(k,arr);
         if(out.length<arr.length){ var n=arr.length-out.length; total+=n; gone.push({prdr:'PR',po:'PO',igp:'IGP',grn:'GRN'}[k]+' '+n); P[k]=out; P.at=Date.now(); }
       });
     }
