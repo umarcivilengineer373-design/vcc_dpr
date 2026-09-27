@@ -55845,11 +55845,11 @@ function ceoTrend(D,n){
   }
   return out;
 }
-function ceoData(){
-  var D=ceoDay();
+function ceoDataAt(D){
   return {D:D, proc:ceoProc(D), store:ceoStore(D), mp:ceoMp(D), work:ceoWork(D), fin:ceoFin(D),
           conc:ceoConc(D), trend:ceoTrend(D,7)};
 }
+function ceoData(){ return ceoDataAt(ceoDay()); }
 
 
 /* ================= the sheet — one colourful A4 page ================= */
@@ -55925,6 +55925,7 @@ function ceoCss(){
 function ceoLogo(){ try{ return window.__VCC_LOGO__||''; }catch(e){ return ''; } }
 function ceoProjName(){
   var p='';
+  try{ if(window.__ceoProjName)return String(window.__ceoProjName); }catch(e){}
   try{ p=(typeof PROJ!=='undefined'&&PROJ&&PROJ.name)||''; }catch(e){}
   if(!p){ try{ p=(S.settings&&S.settings.project)||''; }catch(e){} }
   return p||'Project';
@@ -56213,8 +56214,8 @@ var PG_MM=3.779527559;                        /* px in a mm at 96 dpi */
 var PG_MARGIN_MM=6.35;                        /* 0.25 inch, all four sides */
 var PG_W=Math.round((210-2*PG_MARGIN_MM)*PG_MM);   /* 746 px of paper */
 var PG_H=Math.round((297-2*PG_MARGIN_MM)*PG_MM);   /* 1074 px of paper */
-function ceoPrint(){
-  var d=ceoData();
+function ceoPrint(dd){
+  var d=dd||ceoData();
   var f=document.getElementById('ceoPrintFrame'); if(f)f.remove();
   f=document.createElement('iframe'); f.id='ceoPrintFrame';
   /* a real size, so the page inside is laid out exactly as it will print */
@@ -56307,6 +56308,8 @@ function ceoCsv(){
 }
 
 window.renderCeoRep=renderCeoRep;
+/* the same sheet, built for another project's records — used by CDO Reports */
+window.ceoKit={ dataAt:ceoDataAt, sheet:ceoSheetHTML, css:function(){ return CEO_CSS; }, print:ceoPrint, name:ceoProjName };
 })();
 
 </script>
@@ -59206,10 +59209,11 @@ function cdDay(){ if(!/^\d{4}-\d{2}-\d{2}$/.test(CD.d||''))CD.d=ISO(new Date());
 function projects(){ try{ return allProjects(); }catch(e){ return []; } }
 function stateOf(pr){ try{ return mrProjectState(pr)||null; }catch(e){ return null; } }
 /* run a piece of the application against another project's records */
-function withState(st,fn){
-  var keep=S, out=null;
-  try{ S=st; out=fn(); }catch(e){ console.warn('cdo withState',e); }
-  finally{ S=keep; }
+function withState(st,fn,pr){
+  var keep=S, keepP=null, out=null;
+  try{ keepP=PROJ; }catch(e){}
+  try{ S=st; if(pr){ try{ PROJ=pr; }catch(e){} } out=fn(); }catch(e){ console.warn('cdo withState',e); }
+  finally{ S=keep; if(pr){ try{ PROJ=keepP; }catch(e){} } }
   return out;
 }
 
@@ -59332,7 +59336,37 @@ function tabProg(){
   return h;
 }
 
-var TABS=[['over','📊 PROJECTS OVERVIEW'],['ctr','👷 DAILY CONTRACTOR / SUPPLIER'],['prog','📈 PROGRESS BY PERIOD'],['pay','💰 PAYABLES']];
+/* ---------- 5 · the CEO Daily Report of one project, any day ---------- */
+function ceoProj(){
+  var list=projects(); if(!list.length)return null;
+  if(!CD.cproj||!list.some(function(p){ return p.id===CD.cproj; }))CD.cproj=list[0].id;
+  return list.filter(function(p){ return p.id===CD.cproj; })[0]||null;
+}
+function ceoCssHere(){
+  if(E('cdoCeoCss')||!window.ceoKit)return;
+  var st=document.createElement('style'); st.id='cdoCeoCss';
+  st.textContent=window.ceoKit.css().replace(/^\./gm,'#cdoOv .').replace(/^table\.ce/gm,'#cdoOv table.ce')+'\n#cdoOv .ce-sheet{margin:0 auto}';
+  document.head.appendChild(st);
+}
+function ceoBuild(pr,D){
+  var st=stateOf(pr), k=window.ceoKit; if(!st||!k)return null;
+  return withState(st,function(){
+    window.__ceoProjName=pr.name;
+    try{ var d=k.dataAt(D); return {d:d,html:k.sheet(d)}; }
+    finally{ window.__ceoProjName=''; }
+  },pr);
+}
+function tabCeo(){
+  var D=cdDay(), pr=ceoProj();
+  if(!pr)return '<div class="cos-card"><div class="cos-cb"><div class="empty">No project yet.</div></div></div>';
+  if(!window.ceoKit)return '<div class="cos-card"><div class="cos-cb"><div class="empty">The CEO report module is missing.</div></div></div>';
+  ceoCssHere();
+  var b=ceoBuild(pr,D); CD._ceo=b?b.d:null;
+  if(!b)return '<div class="cos-card"><div class="cos-cb"><div class="empty">'+X(pr.name)+' has no records on this computer yet — press Refresh to read the database.</div></div></div>';
+  return '<div class="cdo-ceo">'+b.html+'</div>';
+}
+
+var TABS=[['over','📊 PROJECTS OVERVIEW'],['ceo','🏢 CEO DAILY REPORT'],['ctr','👷 DAILY CONTRACTOR / SUPPLIER'],['prog','📈 PROGRESS BY PERIOD'],['pay','💰 PAYABLES']];
 function cdoCss(){
   if(E('cdoCss'))return; var k=K(); var base=k?k.css():'';
   var s=document.createElement('style'); s.id='cdoCss';
@@ -59349,10 +59383,13 @@ function paint(){
   tabs.querySelectorAll('[data-cdt]').forEach(function(b){ b.onclick=function(){ CD.tab=b.dataset.cdt; paint(); }; });
   var D=cdDay();
   var bar='';
-  if(CD.tab==='over'||CD.tab==='ctr'){
+  if(CD.tab==='over'||CD.tab==='ctr'||CD.tab==='ceo'){
+    var cp=CD.tab==='ceo'?ceoProj():null;
     bar='<div class="cos-card"><div class="cos-cb" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">'+
-      '<div><label class="fl">Day</label><div style="display:flex;gap:5px"><button class="g" id="cdPrev" style="padding:6px 9px">‹</button><input type="date" id="cdD" value="'+X(D)+'"><button class="g" id="cdNext" style="padding:6px 9px">›</button><button class="g" id="cdToday">Today</button></div></div>'+
+      (CD.tab==='ceo'?('<div><label class="fl">Project</label><select id="cdCP" style="font-weight:700">'+projects().map(function(p){ return '<option value="'+X(p.id)+'"'+(cp&&cp.id===p.id?' selected':'')+'>'+X(p.name)+'</option>'; }).join('')+'</select></div>'):'')+
+      '<div><label class="fl">'+(CD.tab==='ceo'?'Report date':'Day')+'</label><div style="display:flex;gap:5px"><button class="g" id="cdPrev" style="padding:6px 9px">‹</button><input type="date" id="cdD" value="'+X(D)+'"><button class="g" id="cdNext" style="padding:6px 9px">›</button><button class="g" id="cdToday">Today</button></div></div>'+
       (CD.tab==='ctr'?('<div><label class="fl">Project</label><select id="cdP"><option value="">All projects</option>'+projects().map(function(p){ return '<option value="'+X(p.id)+'"'+(CD.proj===p.id?' selected':'')+'>'+X(p.name)+'</option>'; }).join('')+'</select></div>'):'')+
+      (CD.tab==='ceo'?'<span class="hint" style="align-self:center">one page, ready to print — every figure from that project&rsquo;s own records</span>':'')+
       '<span style="margin-left:auto"></span><button class="p" id="cdPrint">🖨 Print</button></div></div>';
   }else if(CD.tab==='prog'){
     if(!CD.to)CD.to=ISO(new Date()); if(!CD.from)CD.from=CD.to.slice(0,8)+'01';
@@ -59362,9 +59399,10 @@ function paint(){
   }else{
     bar='<div class="cos-card"><div class="cos-cb" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><span class="hint">as at '+X(dM(ISO(new Date())))+'</span><span style="margin-left:auto"></span><button class="p" id="cdPrint">🖨 Print</button></div></div>';
   }
-  var title={over:'Projects Overview — '+dM(D),ctr:'Daily Contractor / Supplier Performance — '+dM(D),prog:'Progress by period — '+dM(CD.from||D)+' to '+dM(CD.to||D),pay:'Payables — '+dM(ISO(new Date()))}[CD.tab];
-  body.innerHTML=bar+'<div id="cdoSheet"><div style="font-weight:800;color:#12283f;font-size:1rem;margin:2px 0 10px">'+X(title)+'</div>'+
-    (CD.tab==='over'?tabOver():CD.tab==='ctr'?tabCtr():CD.tab==='prog'?tabProg():tabPay())+'</div>';
+  var cpr=CD.tab==='ceo'?ceoProj():null;
+  var title={over:'Projects Overview — '+dM(D),ceo:'CEO Daily Report — '+(cpr?cpr.name:'')+' — '+dM(D),ctr:'Daily Contractor / Supplier Performance — '+dM(D),prog:'Progress by period — '+dM(CD.from||D)+' to '+dM(CD.to||D),pay:'Payables — '+dM(ISO(new Date()))}[CD.tab];
+  body.innerHTML=bar+'<div id="cdoSheet">'+(CD.tab==='ceo'?'':'<div style="font-weight:800;color:#12283f;font-size:1rem;margin:2px 0 10px">'+X(title)+'</div>')+
+    (CD.tab==='over'?tabOver():CD.tab==='ceo'?tabCeo():CD.tab==='ctr'?tabCtr():CD.tab==='prog'?tabProg():tabPay())+'</div>';
   var g=function(id){ return body.querySelector('#'+id); };
   var shift=function(n){ var p=cdDay().split('-'), dt=new Date(+p[0],+p[1]-1,+p[2]); dt.setDate(dt.getDate()+n); CD.d=ISO(dt); paint(); };
   if(g('cdPrev'))g('cdPrev').onclick=function(){ shift(-1); };
@@ -59372,9 +59410,11 @@ function paint(){
   if(g('cdToday'))g('cdToday').onclick=function(){ CD.d=ISO(new Date()); paint(); };
   if(g('cdD'))g('cdD').onchange=function(){ CD.d=this.value||ISO(new Date()); paint(); };
   if(g('cdP'))g('cdP').onchange=function(){ CD.proj=this.value; paint(); };
+  if(g('cdCP'))g('cdCP').onchange=function(){ CD.cproj=this.value; paint(); };
   if(g('cdF'))g('cdF').onchange=function(){ CD.from=this.value; paint(); };
   if(g('cdT'))g('cdT').onchange=function(){ CD.to=this.value; paint(); };
   if(g('cdPrint'))g('cdPrint').onclick=function(){ var k=K(); var sheet=E('cdoSheet'); if(!sheet)return;
+    if(CD.tab==='ceo'){ var pr=ceoProj(), b=pr?ceoBuild(pr,cdDay()):null; if(b&&window.ceoKit){ window.__ceoProjName=pr.name; try{ window.ceoKit.print(b.d); }finally{ setTimeout(function(){ window.__ceoProjName=''; },1500); } } return; }
     if(k&&k.print){ k.print(title,sheet.innerHTML,true); } else { window.print(); } };
 }
 function cdoOpen(){
