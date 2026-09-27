@@ -7372,6 +7372,30 @@ input.bd-drop{appearance:none;-webkit-appearance:none;cursor:text;padding-right:
     </div>
   </div>
 
+  <div class="card admin-only" id="siCard">
+    <div class="card-h"><h2>Procurement &amp; Store imports</h2><span class="hint">one ERP file per register &mdash; only the rows whose <b>Sub Segment Name</b> (column C) equals this project&rsquo;s name are taken; a line already here is never taken twice</span></div>
+    <div class="card-b">
+      <div id="siProjNote" style="font-size:.8rem;color:var(--muted);margin-bottom:10px"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="primary" data-simp="prdr" style="padding:7px 14px;font-size:.8rem">&#11014; PR file</button>
+        <button class="primary" data-simp="po" style="padding:7px 14px;font-size:.8rem">&#11014; PO file</button>
+        <button class="primary" data-simp="igp" style="padding:7px 14px;font-size:.8rem">&#11014; IGP file</button>
+        <button class="primary" data-simp="grn" style="padding:7px 14px;font-size:.8rem">&#11014; GRN file</button>
+        <button class="primary" data-simp="issue" style="padding:7px 14px;font-size:.8rem;background:#1f8f4e">&#11014; Store Issuance file (Material Out)</button>
+      </div>
+      <div id="siCounts" style="font-size:.76rem;color:var(--muted);margin-top:10px"></div>
+      <div id="siSegs"></div>
+      <div id="siLocks" style="margin-top:12px"></div>
+      <input type="file" id="siFile" accept=".xlsx,.xls,.csv" style="display:none">
+      <style>
+        .lk-bar[data-lk="proc"],.lk-bar[data-lk="storeout"],#tab-proc .lk-veil .lk-unlock,#tab-storeout .lk-veil .lk-unlock,#soImport,#soImpFile,#soAdd{display:none!important}
+        .si-lk{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 12px;border:1px solid var(--border);border-radius:9px;margin-top:6px;background:#fafbfc}
+        .si-lk b{min-width:150px}
+        .si-lk .si-note{font-size:.74rem;color:var(--muted);flex:1;min-width:160px}
+      </style>
+    </div>
+  </div>
+
   <div class="card" bis_skin_checked="1">
     <div class="card-h" bis_skin_checked="1"><h2>Layout</h2><span class="hint">how the app is laid out on this device</span></div>
     <div class="card-b" bis_skin_checked="1">
@@ -22703,6 +22727,13 @@ async function stImportIssue(file){
   try{ rows=await stReadIssueSheet(file); }
   catch(e){ toast('⚠ Could not read this sheet — it needs an Item and a Quantity column (the Excel reader also needs internet).'); return; }
   if(!rows.length){ toast('No issue lines found in that sheet.'); return; }
+  if(window.__pcStrictProj){
+    /* Settings import: only the lines issued against THIS project's name */
+    var _pn=pcKey(window.__pcStrictProj), _seen={}, _all=rows.length;
+    rows=rows.filter(function(r){ var s=String(r.issSub||r.reqSub||'').trim(); _seen[s||'(blank)']=1; return pcKey(s)===_pn; });
+    if(!rows.length){ toast('⚠ No line in that sheet is issued against "'+window.__pcStrictProj+'". The sheet has: '+Object.keys(_seen).slice(0,6).join(' · ')); return; }
+    if(rows.length<_all)toast((_all-rows.length)+' line(s) of other projects left out — '+rows.length+' for this project.');
+  }
   /* this store belongs to one project — another project's issuance sheet is refused */
   var fgn=stForeignInfo(rows);
   if(fgn.bad.length){
@@ -32921,6 +32952,11 @@ async function procImportFile(f,replaceAll,onlyKind){
            status:pcStr(pcPick(ix,row,['Status']))};
         if(!o.grn&&!o.item)o=null;
       }
+      if(o&&window.__pcStrictProj){
+        /* Settings import: the row must carry THIS project's name in column C */
+        var _pn=pcKey(window.__pcStrictProj), _rp=pcKey(o.proj);
+        if(_rp!==_pn){ window.__pcStrictSkipped=(window.__pcStrictSkipped||0)+1; (window.__pcStrictSeen=window.__pcStrictSeen||{})[o.proj||'(blank)']=1; o=null; }
+      }
       if(o){ o._raw=rawOf(row); rows.push(o); }
     }
     if(kind==='grn'){
@@ -32976,7 +33012,12 @@ async function procImportFile(f,replaceAll,onlyKind){
     }
   });
   var tot=added.prdr+added.po+added.igp+added.grn;
-  if(!tot){ toast(onlyKind?('⚠ No '+PC_KIND_LABEL[onlyKind]+' sheet found in that file — this button reads the '+PC_KIND_LABEL[onlyKind]+' file only.'):'⚠ No PR/DR, PO, IGP or GRN sheet found in that file.'); return; }
+  if(!tot){
+    if(window.__pcStrictProj&&window.__pcStrictSkipped){
+      toast('⚠ No row in that file carries the project name in column C ("'+window.__pcStrictProj+'"). The file has: '+Object.keys(window.__pcStrictSeen||{}).slice(0,6).join(' · ')+'. Set the Project Name in Settings exactly as the ERP writes it.');
+      return;
+    }
+    toast(onlyKind?('⚠ No '+PC_KIND_LABEL[onlyKind]+' sheet found in that file — this button reads the '+PC_KIND_LABEL[onlyKind]+' file only.'):'⚠ No PR/DR, PO, IGP or GRN sheet found in that file.'); return; }
   /* a file may hold every site — keep only this project's rows here */
   P._foreign=0; procPruneForeign(P); P._pruned=1;
   ['prdr','po','igp','grn'].forEach(function(k){ added[k]=(P[k]||[]).length; });
@@ -32986,6 +33027,7 @@ async function procImportFile(f,replaceAll,onlyKind){
   var nu=(added._upd_prdr||0)+(added._upd_po||0)+(added._upd_igp||0)+(added._upd_grn||0);
   toast('✅ Imported — PR '+added.prdr+' · PO '+added.po+' · IGP '+added.igp+' · GRN '+added.grn+' rows'+
         ((!replaceAll&&(nn||nu||true))?(' · '+nn+' new, '+nu+' updated, the rest were already there'):'')+
+        (window.__pcStrictSkipped?(' · '+window.__pcStrictSkipped+' row(s) of other projects left out'):'')+
         (P._foreign?(' · '+P._foreign+' row(s) of another project kept aside'):'')+'.');
   /* send the new register up straight away — otherwise the old copy in the database
      is still there when this page is opened again */
@@ -33951,7 +33993,7 @@ function procDashHTML(rows){
     return out;
   })();
   PCX={};
-  pcxPut('k.pr','PR / Demands','prdoc',prDocs,'One row per purchase requisition, with what has been ordered and received against it.');
+  pcxPut('k.pr','PR / Demands','prdoc',prDocs,'One row per purchase requisition, with what has been ordered and received against it.'+(window.pcPrWhy?pcPrWhy(prDocs):''));
   pcxPut('k.po','Purchase Orders','podoc',poDocsRows,'One row per purchase order.');
   pcxPut('k.pov','PO Value','poline',poF,'Every purchase-order line in the register — this is the total shown on the card.');
   pcxPut('k.grn','Received (GRN)','grnline',grnF,'Every GRN line taken into store.');
@@ -33960,6 +34002,13 @@ function procDashHTML(rows){
   Object.keys(vendRows).forEach(function(v){ pcxPut('v.'+v,'Vendor — '+v,'poline',vendRows[v]); });
   Object.keys(grpRows).forEach(function(g){ pcxPut('g.'+g,'Group — '+g,'poline',grpRows[g]); });
   var avg=function(a){ return a.length?(a.reduce(function(x,y){return x+y},0)/a.length):null; };
+  /* "2026-27 · 50  |  2025-26 · 11" under a card — one figure per financial year */
+  var pcYrSplit=function(docs){
+    var m={}; (docs||[]).forEach(function(o){ var y=pcStr(o.year)||'(no year)'; m[y]=(m[y]||0)+1; });
+    var ys=Object.keys(m); if(ys.length<2)return '';
+    ys.sort(function(a,b){ return b.localeCompare(a); });
+    return '<span style="display:block;margin-top:3px;color:var(--navy);font-weight:700">'+ys.map(function(y){ return esc(y)+' <b>'+m[y]+'</b>'; }).join('  ·  ')+'</span>';
+  };
   var kpi=function(ic,bg,lab,val,sub,col,kk){
     return '<div'+(kk?pcxTag(kk):'')+' style="flex:1;min-width:158px;background:#fff;border:1px solid var(--border);border-radius:12px;padding:11px 13px;display:flex;gap:10px;align-items:flex-start'+(kk?';cursor:pointer':'')+'">'+
       '<span style="width:34px;height:34px;border-radius:10px;background:'+bg+';display:inline-flex;align-items:center;justify-content:center;font-size:1.05rem;flex:none">'+ic+'</span>'+
@@ -33981,8 +34030,8 @@ function procDashHTML(rows){
       '</style>'+
     '<div style="font-size:.7rem;color:var(--muted);margin:-2px 0 8px">Tap any card, status, vendor, group, funnel step or year to open its detail.</div>'+
     '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'+
-      kpi('📝','#eef3f8','PR / Demands',String(prDocs.length),fmt(prLines)+' PR line items',null,'k.pr')+
-      kpi('📄','#e8f1fb','Purchase Orders',String(poDocs),'PO lines '+poF.length,'#0e7bb8','k.po')+
+      kpi('📝','#eef3f8','PR / Demands',String(prDocs.length),fmt(prLines)+' PR line items'+pcYrSplit(prDocs),null,'k.pr')+
+      kpi('📄','#e8f1fb','Purchase Orders',String(poDocsRows.length),'PO lines '+poF.length+pcYrSplit(poDocsRows),'#0e7bb8','k.po')+
       kpi('💰','#fdf3e3','PO Value',fmtMoney(poReg),poDocs+' PO(s) · '+poF.length+' PO line(s)','#c98a1b','k.pov')+
       kpi('🚚','#e9f6ee','Received (GRN)',fmtMoney(recAmt),igpCount+' IGP(s) · '+grnF.length+' GRN line(s)','#1f8f4e','k.grn')+
       kpi('⏱','#f4eefb','Avg PR → PO',(avg(lead1)==null?'—':avg(lead1).toFixed(1)+' d'),'PO → IGP '+(avg(lead2)==null?'—':avg(lead2).toFixed(1)+' d'),'#7c5cbf','k.lead')+
@@ -35242,6 +35291,7 @@ if($('pcFile'))$('pcFile').addEventListener('change',async function(e){
 });
 /* the import buttons inside the PR / PO / IGP / GRN registers — one file per register */
 window.pcImpBar=function(){
+  return '';   /* imports live in Settings ▸ Procurement & Store imports now */
   var k=PC_VIEW, L=PC_KIND_LABEL[k]; if(!L)return '';
   return '<div class="admin-only no-print" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 10px">'+
     '<button class="primary" data-pcimp="'+k+'" style="padding:6px 14px;font-size:.78rem">⬆ Import '+L+' file</button>'+
@@ -39906,7 +39956,7 @@ function lkBlock(k){
   var t=Date.now();
   if(t-(lkBlock._at||0)>2200){
     lkBlock._at=t;
-    toast('\u{1F512} '+lkLabel(k)+' is locked — press “Unlock” on that sheet to make changes.');
+    toast('\u{1F512} '+lkLabel(k)+' is locked — '+((window.LK_IN_SETTINGS&&window.LK_IN_SETTINGS[k])?'unlock it in Settings ▸ Procurement & Store imports.':'press “Unlock” on that sheet to make changes.'));
   }
   return true;
 }
@@ -39950,7 +40000,8 @@ function lkBannerHTML(k,lk){
         (lk.at?(' on '+esc(fmtMed(iso(new Date(lk.at))))):'')+
         '. You can still read, filter, print and export this sheet — nothing can be imported, added, edited or deleted until it is unlocked.</div>'+
     '</div>'+
-    '<button type="button" class="ghost lk-unlock" style="padding:6px 14px;font-size:.8rem;font-weight:700;border-color:#b7952a;color:#8a6d1a">\u{1F513} Unlock</button>'+
+    ((window.LK_IN_SETTINGS&&window.LK_IN_SETTINGS[k])?'<span style="font-size:.76rem;font-weight:700;color:#8a6d1a">Unlock from Settings \u25B8 Procurement &amp; Store imports</span>':
+    '<button type="button" class="ghost lk-unlock" style="padding:6px 14px;font-size:.8rem;font-weight:700;border-color:#b7952a;color:#8a6d1a">\u{1F513} Unlock</button>')+
   '</div>';
 }
 async function lkToggle(k){
@@ -40051,7 +40102,7 @@ function lkSweepPane(k){
   }
   /* controls */
   pane.querySelectorAll('button,input,select,textarea,[contenteditable="true"]').forEach(function(el){
-    if(el.closest('.lk-bar')||el.closest('.lk-veil'))return;
+    if(el.closest('.lk-bar')||el.closest('.lk-veil')||el.closest('#siCard'))return;
     var tag=el.tagName;
     var mut;
     if(tag==='BUTTON'||(tag==='INPUT'&&/^(button|submit)$/i.test(el.type||''))){
@@ -55397,8 +55448,9 @@ function gloTrimPicker(){
     if(!t.cos)grid.querySelectorAll('[data-cosdata]').forEach(function(b){ b.remove(); });
     var finOk=!!t.fin; try{ if(!finOk)finOk=!!(window.__finAccessOk&&window.__finAccessOk(u)); }catch(e){}
     if(!finOk)grid.querySelectorAll('[data-findata]').forEach(function(b){ b.remove(); });
+    grid.querySelectorAll('[data-cdodata]').forEach(function(b){ b.remove(); });   /* CDO Reports: Admins only */
   }
-  if(!left&&!grid.querySelector('[data-cosdata],[data-findata]')){
+  if(!left&&!grid.querySelector('[data-cosdata],[data-findata],[data-cdodata]')){
     var d=document.createElement('div');
     d.style.cssText='font-size:.82rem;color:var(--muted);padding:14px;text-align:center';
     d.textContent='No project has been given to this account yet — ask an admin in Master Settings.';
@@ -59089,6 +59141,381 @@ window.procGrnPayWire=function(){
   };
 };
 window.__gpCount=function(){ try{ var P=procState(); return (P.grn||[]).filter(function(r){ return r&&!/^\s*(clos|paid)/i.test(String(r.status||'')); }).length; }catch(e){ return ''; } };
+})();
+
+</script>
+<script id="cdoMod">
+/* ==================================================================
+   CDO REPORTS — the company-wide view, every project on one screen.
+   Nothing is typed here: each figure is read from the projects' own
+   records (progress, BOQ, procurement, store, work orders) and from
+   Finance. Admins only.
+   ================================================================== */
+(function(){
+'use strict';
+function E(id){ return document.getElementById(id); }
+function X(s){ try{ return esc(s); }catch(e){ return String(s==null?'':s); } }
+function N(v){ var n=parseFloat(String(v==null?'':v).replace(/[, ]/g,'')); return isFinite(n)?n:0; }
+function F(n){ try{ return fmt(n); }catch(e){ return String(Math.round(n*100)/100); } }
+function M(n){ return Math.round(N(n)).toLocaleString('en-US'); }
+function ISO(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function dM(s){ try{ return fmtMed(s); }catch(e){ return s; } }
+function T(m){ try{ toast(m); }catch(e){} }
+function K(){ return window.__cosKit||null; }
+function isAdmin(){ try{ if(typeof window.__gloIsAdmin==='function')return !!window.__gloIsAdmin(); }catch(e){} try{ if(typeof isAdmin==='function')return !!isAdmin(); }catch(e){} return false; }
+
+var CD={tab:'over',d:'',proj:'',from:'',to:''};
+function cdDay(){ if(!/^\d{4}-\d{2}-\d{2}$/.test(CD.d||''))CD.d=ISO(new Date()); return CD.d; }
+function projects(){ try{ return allProjects(); }catch(e){ return []; } }
+function stateOf(pr){ try{ return mrProjectState(pr)||null; }catch(e){ return null; } }
+/* run a piece of the application against another project's records */
+function withState(st,fn){
+  var keep=S, out=null;
+  try{ S=st; out=fn(); }catch(e){ console.warn('cdo withState',e); }
+  finally{ S=keep; }
+  return out;
+}
+
+/* ---------- figures per project ---------- */
+function projFigures(pr,D){
+  var st=stateOf(pr); if(!st)return null;
+  var boqVal=0, doneVal=0, boqN=0;
+  var cum={};
+  Object.keys(st.days||{}).forEach(function(k){ if(k>D)return; ((st.days[k]||{}).progress||[]).forEach(function(p){ cum[p.boqId]=(cum[p.boqId]||0)+N(p.qty); }); });
+  (st.boq||[]).forEach(function(b){ boqN++; var v=N(b.qty)*N(b.rate); boqVal+=v; var d=Math.min(N(b.qty),cum[b.id]||0); doneVal+=d*N(b.rate); });
+  var day=(st.days||{})[D]||{}, prog=(day.progress||[]).filter(function(p){ return p.boqId&&N(p.qty); });
+  var mp=0; try{ Object.keys(day.manpower||{}).forEach(function(k){ mp+=N(day.manpower[k]); }); }catch(e){}
+  var conc=(day.concrete||[]).reduce(function(a,c){ return a+N(c&&c.qty); },0);
+  var ctr={}; prog.forEach(function(p){ var v=String(p.vendor||'').trim(); if(v)ctr[v]=1; });
+  var dayVal=0; prog.forEach(function(p){ var b=(st.boq||[]).filter(function(x){ return x.id===p.boqId; })[0]; if(b)dayVal+=N(p.qty)*N(b.rate); });
+  /* procurement */
+  var P=st.proc||{}, grnOpen=0, grnOpenN=0, grnVal=0, prN=(P.prdr||[]).length, poN=(P.po||[]).length, grnN=(P.grn||[]).length;
+  (P.grn||[]).forEach(function(r){ var v=N(r.value)||N(r.qty)*N(r.rate); grnVal+=v; if(!/^\s*(clos|paid)/i.test(String(r.status||''))){ grnOpen+=v; grnOpenN++; } });
+  /* work orders */
+  var woN=(st.workOrders||[]).length, woVal=0; (st.workOrders||[]).forEach(function(w){ try{ woVal+=(typeof cvdVal==='function')?cvdVal(w):0; }catch(e){} });
+  var days=Object.keys(st.days||{}).filter(function(k){ return /^\d{4}-\d{2}-\d{2}$/.test(k)&&((st.days[k]||{}).progress||[]).length; }).sort();
+  var rn=''; try{ rn=withState(st,function(){ return reportNo(D); }); }catch(e){}
+  return {pr:pr,st:st,boqVal:boqVal,doneVal:doneVal,pct:boqVal?doneVal/boqVal*100:0,boqN:boqN,
+    progN:prog.length,dayVal:dayVal,mp:mp,conc:conc,ctr:Object.keys(ctr),rn:rn,
+    prN:prN,poN:poN,grnN:grnN,grnVal:grnVal,grnOpen:grnOpen,grnOpenN:grnOpenN,woN:woN,woVal:woVal,
+    firstDay:days[0]||'',lastDay:days[days.length-1]||''};
+}
+function finByProject(){
+  var m={}; try{ var f=(typeof window.__finPayable==='function')?window.__finPayable():null; if(f&&f.byProject)f.byProject.forEach(function(p){ m[String(p.name||'').trim().toLowerCase()]=p; }); }catch(e){}
+  return m;
+}
+function finFor(pr,map){
+  var keys=[pr.name,pr.id,(pr.sub||''),(pr.short||'')].map(function(x){ return String(x||'').trim().toLowerCase(); }).filter(Boolean);
+  for(var i=0;i<keys.length;i++){ if(map[keys[i]])return map[keys[i]]; }
+  var hit=null; Object.keys(map).forEach(function(k){ if(hit)return; if(keys.some(function(x){ return x&&(k.indexOf(x)>=0||x.indexOf(k)>=0); }))hit=map[k]; });
+  return hit;
+}
+
+/* ---------- 1 · overview ---------- */
+function tabOver(){
+  var D=cdDay(), fm=finByProject(), rows=[], tot={boqVal:0,doneVal:0,progN:0,dayVal:0,mp:0,conc:0,grnOpen:0,finBal:0,woVal:0};
+  projects().forEach(function(pr){ var f=projFigures(pr,D); if(!f)return; var fin=finFor(pr,fm); f.finBal=fin?N(fin.bal):0; f.finRec=fin?N(fin.rec):0; f.finPaid=fin?N(fin.paid):0; rows.push(f);
+    tot.boqVal+=f.boqVal; tot.doneVal+=f.doneVal; tot.progN+=f.progN; tot.dayVal+=f.dayVal; tot.mp+=f.mp; tot.conc+=f.conc; tot.grnOpen+=f.grnOpen; tot.finBal+=f.finBal; tot.woVal+=f.woVal; });
+  var tile=function(n,l,c,s){ return '<div class="b" style="border-left-color:'+c+'"><div class="n">'+n+'</div><div class="l">'+l+'</div>'+(s?('<div style="font-size:.7rem;color:#6d8199">'+s+'</div>'):'')+'</div>'; };
+  var h='<div class="kpi">'+tile(rows.length,'Projects','#1d5a8f')+tile('Rs '+M(tot.doneVal),'Work done to date','#1c7a42',tot.boqVal?(tot.doneVal/tot.boqVal*100).toFixed(1)+'% of Rs '+M(tot.boqVal)+' BOQ':'')+
+    tile('Rs '+M(tot.dayVal),'Work done on '+X(dM(D)),'#5b47a0',tot.progN+' measurement line'+(tot.progN===1?'':'s'))+tile(tot.mp,'Manpower on the day','#c98a1b')+
+    tile('Rs '+M(tot.finBal),'Contractor payable (Finance)','#b02a2a')+tile('Rs '+M(tot.grnOpen),'Supplier payable (open GRNs)','#b02a2a')+'</div>';
+  h+='<div class="cos-card"><div class="cos-ch"><h3>🏗 Project by project</h3><span class="hint">as at '+X(dM(D))+' — progress, day, procurement and payables</span></div><div class="cos-cb" style="padding:0"><div class="cos-tw" style="border:none;border-radius:0"><table class="cos-t"><thead><tr>'+
+    '<th>Project</th><th style="text-align:right">BOQ value</th><th style="text-align:right">Work done</th><th style="width:150px">% done</th><th style="text-align:right">Today lines</th><th style="text-align:right">Today value</th><th style="text-align:right">Manpower</th><th style="text-align:right">Concrete</th><th>Contractors today</th><th style="text-align:right">PR / PO / GRN</th><th style="text-align:right">Work orders</th><th style="text-align:right">Contractor payable</th><th style="text-align:right">Supplier payable</th></tr></thead><tbody>';
+  rows.forEach(function(f){
+    h+='<tr><td><b>'+X(f.pr.name)+'</b><div style="font-size:.68rem;color:#6d8199">'+(f.rn?('DPR '+X(f.rn)+' · '):'')+(f.firstDay?('since '+X(dM(f.firstDay))):'no progress yet')+'</div></td>'+
+      '<td style="text-align:right">'+M(f.boqVal)+'</td><td style="text-align:right;color:#1c7a42;font-weight:700">'+M(f.doneVal)+'</td>'+
+      '<td><div style="display:flex;align-items:center;gap:6px"><div style="flex:1;height:7px;background:#e5ecf4;border-radius:4px;overflow:hidden"><i style="display:block;height:100%;width:'+Math.min(100,f.pct)+'%;background:#1d5a8f"></i></div><span style="font-size:.74rem;font-weight:700">'+f.pct.toFixed(1)+'%</span></div></td>'+
+      '<td style="text-align:right">'+f.progN+'</td><td style="text-align:right">'+M(f.dayVal)+'</td><td style="text-align:right">'+f.mp+'</td><td style="text-align:right">'+(f.conc?F(f.conc)+' m³':'—')+'</td>'+
+      '<td style="font-size:.74rem">'+(f.ctr.length?X(f.ctr.join(', ')):'—')+'</td><td style="text-align:right;white-space:nowrap">'+f.prN+' / '+f.poN+' / '+f.grnN+'</td><td style="text-align:right">'+f.woN+(f.woVal?('<div style="font-size:.68rem;color:#6d8199">Rs '+M(f.woVal)+'</div>'):'')+'</td>'+
+      '<td style="text-align:right;color:#b02a2a;font-weight:700">'+M(f.finBal)+'</td><td style="text-align:right;color:#b02a2a;font-weight:700">'+M(f.grnOpen)+(f.grnOpenN?('<div style="font-size:.68rem;color:#6d8199">'+f.grnOpenN+' open line'+(f.grnOpenN===1?'':'s')+'</div>'):'')+'</td></tr>';
+  });
+  h+='<tr class="tot"><td>TOTAL</td><td style="text-align:right">'+M(tot.boqVal)+'</td><td style="text-align:right">'+M(tot.doneVal)+'</td><td>'+(tot.boqVal?(tot.doneVal/tot.boqVal*100).toFixed(1)+'%':'')+'</td><td style="text-align:right">'+tot.progN+'</td><td style="text-align:right">'+M(tot.dayVal)+'</td><td style="text-align:right">'+tot.mp+'</td><td style="text-align:right">'+(tot.conc?F(tot.conc)+' m³':'')+'</td><td></td><td></td><td style="text-align:right">'+M(tot.woVal)+'</td><td style="text-align:right">'+M(tot.finBal)+'</td><td style="text-align:right">'+M(tot.grnOpen)+'</td></tr>';
+  h+='</tbody></table></div></div></div>';
+  h+='<div style="font-size:.74rem;color:#6d8199;margin-top:8px">Work done = measured progress × BOQ rate, capped at the BOQ quantity. Contractor payable comes from Finance (bills received − paid, per project). Supplier payable = GRN lines not marked Closed. A project that has never been opened on this computer shows what the database has sent.</div>';
+  return h;
+}
+
+/* ---------- 2 · daily contractor / supplier performance, every project ---------- */
+function tabCtr(){
+  var D=cdDay(), h='', any=false;
+  projects().forEach(function(pr){
+    if(CD.proj&&pr.id!==CD.proj)return;
+    var st=stateOf(pr); if(!st)return;
+    var sec=withState(st,function(){ return (window.cpDprSection?window.cpDprSection(D):'')||''; });
+    if(!sec)return; any=true;
+    h+='<div class="cos-card"><div class="cos-ch"><h3>🏗 '+X(pr.name)+'</h3><span class="hint">'+X(dM(D))+'</span></div><div class="cos-cb cdo-dpr">'+sec.replace(/<h3 class="sec">[^<]*<\/h3>/,'')+'</div></div>';
+  });
+  if(!any)h='<div class="cos-card"><div class="cos-cb"><div class="empty">No contractor measurement on '+X(dM(D))+' on any project.</div></div></div>';
+  return h;
+}
+
+/* ---------- 3 · payables, both sides ---------- */
+function tabPay(){
+  var fm=finByProject(), rows=[], tot={rec:0,paid:0,bal:0,grn:0,grnOpen:0};
+  projects().forEach(function(pr){ var st=stateOf(pr); if(!st)return; var fin=finFor(pr,fm)||{rec:0,paid:0,bal:0};
+    var grnVal=0, grnOpen=0, byV={}; ((st.proc||{}).grn||[]).forEach(function(r){ var v=N(r.value)||N(r.qty)*N(r.rate); grnVal+=v; if(!/^\s*(clos|paid)/i.test(String(r.status||''))){ grnOpen+=v; var k=String(r.vendor||'').trim()||'(no vendor)'; byV[k]=(byV[k]||0)+v; } });
+    rows.push({pr:pr,rec:N(fin.rec),paid:N(fin.paid),bal:N(fin.bal),grn:grnVal,grnOpen:grnOpen,byV:byV});
+    tot.rec+=N(fin.rec); tot.paid+=N(fin.paid); tot.bal+=N(fin.bal); tot.grn+=grnVal; tot.grnOpen+=grnOpen; });
+  var tile=function(n,l,c){ return '<div class="b" style="border-left-color:'+c+'"><div class="n">'+n+'</div><div class="l">'+l+'</div></div>'; };
+  var h='<div class="kpi">'+tile('Rs '+M(tot.rec),'Contractor bills received','#1d5a8f')+tile('Rs '+M(tot.paid),'Contractor bills paid','#1c7a42')+tile('Rs '+M(tot.bal),'Contractor payable','#b02a2a')+tile('Rs '+M(tot.grnOpen),'Supplier payable (open GRNs)','#c98a1b')+tile('Rs '+M(tot.bal+tot.grnOpen),'Total payable','#5b47a0')+'</div>';
+  h+='<div class="cos-card"><div class="cos-ch"><h3>💰 Payable by project</h3><span class="hint">contractors from Finance · suppliers from the GRN registers</span></div><div class="cos-cb" style="padding:0"><div class="cos-tw" style="border:none;border-radius:0"><table class="cos-t"><thead><tr><th>Project</th><th style="text-align:right">Bills received</th><th style="text-align:right">Bills paid</th><th style="text-align:right">Contractor payable</th><th style="text-align:right">GRN received</th><th style="text-align:right">Supplier payable</th><th style="text-align:right">Total payable</th></tr></thead><tbody>';
+  rows.forEach(function(r){ h+='<tr><td><b>'+X(r.pr.name)+'</b></td><td style="text-align:right">'+M(r.rec)+'</td><td style="text-align:right;color:#1c7a42">'+M(r.paid)+'</td><td style="text-align:right;font-weight:700;color:#b02a2a">'+M(r.bal)+'</td><td style="text-align:right">'+M(r.grn)+'</td><td style="text-align:right;font-weight:700;color:#b02a2a">'+M(r.grnOpen)+'</td><td style="text-align:right;font-weight:800">'+M(r.bal+r.grnOpen)+'</td></tr>'; });
+  h+='<tr class="tot"><td>TOTAL</td><td style="text-align:right">'+M(tot.rec)+'</td><td style="text-align:right">'+M(tot.paid)+'</td><td style="text-align:right">'+M(tot.bal)+'</td><td style="text-align:right">'+M(tot.grn)+'</td><td style="text-align:right">'+M(tot.grnOpen)+'</td><td style="text-align:right">'+M(tot.bal+tot.grnOpen)+'</td></tr></tbody></table></div></div></div>';
+  /* contractors, all projects */
+  try{ var f=(typeof window.__finPayable==='function')?window.__finPayable():null;
+    if(f&&f.byVendor&&f.byVendor.length){
+      h+='<div class="cos-card"><div class="cos-ch"><h3>👷 Contractors — balance payable</h3><span class="hint">from Finance, every project together</span></div><div class="cos-cb" style="padding:0"><div class="cos-tw" style="border:none;border-radius:0"><table class="cos-t"><thead><tr><th>Contractor / Vendor</th><th style="text-align:right">Bills received</th><th style="text-align:right">Paid</th><th style="text-align:right">Balance</th><th style="text-align:right">Lines</th></tr></thead><tbody>'+
+        f.byVendor.slice().sort(function(a,b){ return N(b.bal)-N(a.bal); }).map(function(v){ return '<tr><td><b>'+X(v.name)+'</b></td><td style="text-align:right">'+M(v.rec)+'</td><td style="text-align:right;color:#1c7a42">'+M(v.paid)+'</td><td style="text-align:right;font-weight:700'+(N(v.bal)>0?';color:#b02a2a':'')+'">'+M(v.bal)+'</td><td style="text-align:right;color:#6d8199">'+v.n+'</td></tr>'; }).join('')+
+        '<tr class="tot"><td>TOTAL</td><td style="text-align:right">'+M(f.tot.rec)+'</td><td style="text-align:right">'+M(f.tot.paid)+'</td><td style="text-align:right">'+M(f.tot.bal)+'</td><td></td></tr></tbody></table></div></div></div>';
+    } }catch(e){}
+  /* suppliers, all projects */
+  var SV={}; rows.forEach(function(r){ Object.keys(r.byV).forEach(function(k){ if(!SV[k])SV[k]={v:0,p:{}}; SV[k].v+=r.byV[k]; SV[k].p[r.pr.name]=1; }); });
+  var sk=Object.keys(SV).sort(function(a,b){ return SV[b].v-SV[a].v; });
+  if(sk.length){
+    h+='<div class="cos-card"><div class="cos-ch"><h3>🏢 Suppliers — balance payable (open GRNs)</h3><span class="hint">every project together</span></div><div class="cos-cb" style="padding:0"><div class="cos-tw" style="border:none;border-radius:0"><table class="cos-t"><thead><tr><th>Supplier</th><th>Projects</th><th style="text-align:right">Open GRN value</th></tr></thead><tbody>'+
+      sk.map(function(k){ return '<tr><td><b>'+X(k)+'</b></td><td style="font-size:.74rem">'+X(Object.keys(SV[k].p).join(', '))+'</td><td style="text-align:right;font-weight:700;color:#b02a2a">'+M(SV[k].v)+'</td></tr>'; }).join('')+
+      '<tr class="tot"><td>TOTAL</td><td></td><td style="text-align:right">'+M(tot.grnOpen)+'</td></tr></tbody></table></div></div></div>';
+  }
+  return h;
+}
+
+/* ---------- 4 · progress by period, every project ---------- */
+function tabProg(){
+  if(!CD.to)CD.to=ISO(new Date()); if(!CD.from){ CD.from=CD.to.slice(0,8)+'01'; }
+  var rows=[], tot={n:0,val:0,days:0};
+  projects().forEach(function(pr){ var st=stateOf(pr); if(!st)return; var byId={}; (st.boq||[]).forEach(function(b){ byId[b.id]=b; });
+    var n=0,val=0,days={},ctr={},items={};
+    Object.keys(st.days||{}).forEach(function(k){ if(k<CD.from||k>CD.to)return; ((st.days[k]||{}).progress||[]).forEach(function(p){ if(!p.boqId||!N(p.qty))return; n++; days[k]=1; var b=byId[p.boqId]; if(b){ val+=N(p.qty)*N(b.rate); items[b.name]=(items[b.name]||0)+N(p.qty); } var v=String(p.vendor||'').trim(); if(v)ctr[v]=(ctr[v]||0)+1; }); });
+    rows.push({pr:pr,n:n,val:val,days:Object.keys(days).length,ctr:ctr,items:items}); tot.n+=n; tot.val+=val; tot.days+=Object.keys(days).length; });
+  var h='<div class="kpi"><div class="b"><div class="n">'+tot.n+'</div><div class="l">Measurement lines</div></div><div class="b" style="border-left-color:#1c7a42"><div class="n">Rs '+M(tot.val)+'</div><div class="l">Value of work (BOQ rate)</div></div><div class="b" style="border-left-color:#5b47a0"><div class="n">'+tot.days+'</div><div class="l">Project-days worked</div></div></div>';
+  rows.forEach(function(r){ var top=Object.keys(r.items).sort(function(a,b){ return r.items[b]-r.items[a]; }).slice(0,6);
+    h+='<div class="cos-card"><div class="cos-ch"><h3>🏗 '+X(r.pr.name)+'</h3><span class="hint">'+r.n+' line'+(r.n===1?'':'s')+' · '+r.days+' day'+(r.days===1?'':'s')+' · Rs '+M(r.val)+'</span></div><div class="cos-cb">'+
+      (r.n?('<div style="font-size:.8rem"><b>Contractors:</b> '+(Object.keys(r.ctr).length?X(Object.keys(r.ctr).map(function(c){ return c+' ('+r.ctr[c]+')'; }).join(' · ')):'—')+'</div><div style="font-size:.8rem;margin-top:4px"><b>Most measured:</b> '+X(top.map(function(k){ return k+' — '+F(r.items[k]); }).join(' · '))+'</div>'):'<div class="empty">No progress in this period.</div>')+'</div></div>'; });
+  return h;
+}
+
+var TABS=[['over','📊 PROJECTS OVERVIEW'],['ctr','👷 DAILY CONTRACTOR / SUPPLIER'],['prog','📈 PROGRESS BY PERIOD'],['pay','💰 PAYABLES']];
+function cdoCss(){
+  if(E('cdoCss'))return; var k=K(); var base=k?k.css():'';
+  var s=document.createElement('style'); s.id='cdoCss';
+  s.textContent=base.replace(/#cosOv/g,'#cdoOv')+'\n#cdoOv .cos-body{max-width:none;padding:12px 14px 40px}\n#cdoOv .cos-logo{display:inline-flex;align-items:center;background:#fff;border-radius:10px;padding:4px 10px;height:40px}#cdoOv .cos-logo img{height:30px;width:auto;display:block}'+
+    '\n#cdoOv .cdo-dpr table.grid{width:100%;border-collapse:collapse;font-size:.8rem;margin:6px 0 10px}#cdoOv .cdo-dpr table.grid th{background:#eef2f6;color:#12283f;font-size:.68rem;text-transform:uppercase;letter-spacing:.04em;padding:6px 8px;text-align:left;border:1px solid #d5dfea}#cdoOv .cdo-dpr table.grid td{padding:5px 8px;border:1px solid #e3eaf2;vertical-align:top}#cdoOv .cdo-dpr td.num{text-align:right;white-space:nowrap}#cdoOv .cdo-dpr td.ctr{text-align:center}#cdoOv .cdo-dpr tr.mp-total td{background:#f2f5f8;font-weight:800}#cdoOv .cdo-dpr .empty{color:#9aa8b8;padding:10px;font-size:.85rem}'+
+    '\n#cdoOv .cos-t tr.tot td{background:#f2f5f8;font-weight:800}';
+  document.head.appendChild(s);
+}
+function logo(){ try{ var h=String(window.__VCC_LOGO__||''); var m=h.match(/src="([^"]+)"/); if(m)return '<span class="cos-logo"><img alt="The Vertical" src="'+m[1]+'"></span>'; }catch(e){} return '<span class="cos-mark">📑</span>'; }
+function paint(){
+  var ov=E('cdoOv'); if(!ov)return;
+  var tabs=ov.querySelector('#cdoTabs'), body=ov.querySelector('#cdoBody');
+  tabs.innerHTML=TABS.map(function(t){ return '<button class="cos-tab'+(CD.tab===t[0]?' on':'')+'" data-cdt="'+t[0]+'">'+t[1]+'</button>'; }).join('');
+  tabs.querySelectorAll('[data-cdt]').forEach(function(b){ b.onclick=function(){ CD.tab=b.dataset.cdt; paint(); }; });
+  var D=cdDay();
+  var bar='';
+  if(CD.tab==='over'||CD.tab==='ctr'){
+    bar='<div class="cos-card"><div class="cos-cb" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">'+
+      '<div><label class="fl">Day</label><div style="display:flex;gap:5px"><button class="g" id="cdPrev" style="padding:6px 9px">‹</button><input type="date" id="cdD" value="'+X(D)+'"><button class="g" id="cdNext" style="padding:6px 9px">›</button><button class="g" id="cdToday">Today</button></div></div>'+
+      (CD.tab==='ctr'?('<div><label class="fl">Project</label><select id="cdP"><option value="">All projects</option>'+projects().map(function(p){ return '<option value="'+X(p.id)+'"'+(CD.proj===p.id?' selected':'')+'>'+X(p.name)+'</option>'; }).join('')+'</select></div>'):'')+
+      '<span style="margin-left:auto"></span><button class="p" id="cdPrint">🖨 Print</button></div></div>';
+  }else if(CD.tab==='prog'){
+    if(!CD.to)CD.to=ISO(new Date()); if(!CD.from)CD.from=CD.to.slice(0,8)+'01';
+    bar='<div class="cos-card"><div class="cos-cb" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">'+
+      '<div><label class="fl">From</label><input type="date" id="cdF" value="'+X(CD.from)+'"></div><div><label class="fl">To</label><input type="date" id="cdT" value="'+X(CD.to)+'"></div>'+
+      '<span style="margin-left:auto"></span><button class="p" id="cdPrint">🖨 Print</button></div></div>';
+  }else{
+    bar='<div class="cos-card"><div class="cos-cb" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><span class="hint">as at '+X(dM(ISO(new Date())))+'</span><span style="margin-left:auto"></span><button class="p" id="cdPrint">🖨 Print</button></div></div>';
+  }
+  var title={over:'Projects Overview — '+dM(D),ctr:'Daily Contractor / Supplier Performance — '+dM(D),prog:'Progress by period — '+dM(CD.from||D)+' to '+dM(CD.to||D),pay:'Payables — '+dM(ISO(new Date()))}[CD.tab];
+  body.innerHTML=bar+'<div id="cdoSheet"><div style="font-weight:800;color:#12283f;font-size:1rem;margin:2px 0 10px">'+X(title)+'</div>'+
+    (CD.tab==='over'?tabOver():CD.tab==='ctr'?tabCtr():CD.tab==='prog'?tabProg():tabPay())+'</div>';
+  var g=function(id){ return body.querySelector('#'+id); };
+  var shift=function(n){ var p=cdDay().split('-'), dt=new Date(+p[0],+p[1]-1,+p[2]); dt.setDate(dt.getDate()+n); CD.d=ISO(dt); paint(); };
+  if(g('cdPrev'))g('cdPrev').onclick=function(){ shift(-1); };
+  if(g('cdNext'))g('cdNext').onclick=function(){ shift(1); };
+  if(g('cdToday'))g('cdToday').onclick=function(){ CD.d=ISO(new Date()); paint(); };
+  if(g('cdD'))g('cdD').onchange=function(){ CD.d=this.value||ISO(new Date()); paint(); };
+  if(g('cdP'))g('cdP').onchange=function(){ CD.proj=this.value; paint(); };
+  if(g('cdF'))g('cdF').onchange=function(){ CD.from=this.value; paint(); };
+  if(g('cdT'))g('cdT').onchange=function(){ CD.to=this.value; paint(); };
+  if(g('cdPrint'))g('cdPrint').onclick=function(){ var k=K(); var sheet=E('cdoSheet'); if(!sheet)return;
+    if(k&&k.print){ k.print(title,sheet.innerHTML,true); } else { window.print(); } };
+}
+function cdoOpen(){
+  if(!isAdmin()){ T('🔒 CDO Reports are open to Admins only.'); return; }
+  if(!K()){ T('CDO Reports could not start — the COS module is missing.'); return; }
+  cdoCss();
+  var ov=E('cdoOv'); if(ov)ov.remove();
+  ov=document.createElement('div'); ov.id='cdoOv';
+  ov.innerHTML='<div class="cos-top">'+logo()+'<span><span class="cos-ttl">CDO REPORTS</span><span class="cos-sub">THE VERTICAL · ALL PROJECTS</span></span>'+
+    '<span class="sp" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="cos-chip">📑 read only</span><button class="cos-btn" id="cdoRefresh">↻ Refresh</button><button class="cos-btn x" id="cdoX">✕ Close</button></span></div>'+
+    '<div class="cos-tabs" id="cdoTabs"></div><div class="cos-body" id="cdoBody"></div>';
+  document.body.appendChild(ov);
+  ov.querySelector('#cdoX').onclick=function(){ ov.remove(); };
+  ov.querySelector('#cdoRefresh').onclick=function(){ try{ if(typeof cloudPullAll==='function')cloudPullAll(true); }catch(e){} setTimeout(paint,1200); T('↻ Reading the database…'); };
+  paint();
+}
+window.openCdoReports=cdoOpen;
+
+/* ---------- the tile, beside Finance ---------- */
+function tileHTML(){
+  var n=projects().length;
+  return '<button class="lg-proj" data-cdodata="1" style="border-color:#8fa6bd">'+
+    '<span style="display:inline-flex;align-items:center;justify-content:center;width:92px;height:52px;background:linear-gradient(135deg,#3b2a5e,#5b47a0);color:#fff;border-radius:10px;font-size:1.5rem">📑</span>'+
+    '<span class="t"><span class="n">CDO Reports</span><span class="s">'+n+' project'+(n===1?'':'s')+' · overview · contractors · payables</span></span><span class="go">›</span></button>';
+}
+function tile(){
+  var box=E('lgPickList'); if(!box)return; var grid=box.querySelector('.lg-grid'); if(!grid)return;
+  if(!isAdmin()){ grid.querySelectorAll('[data-cdodata]').forEach(function(b){ b.remove(); }); return; }
+  if(grid.querySelector('[data-cdodata]'))return;
+  var w=document.createElement('div'); w.innerHTML=tileHTML(); var b=w.firstChild;
+  var fin=grid.querySelector('[data-findata]'), cos=grid.querySelector('[data-cosdata]'), after=fin||cos;
+  if(after&&after.nextSibling)grid.insertBefore(b,after.nextSibling); else grid.appendChild(b);
+  b.onclick=function(){ cdoOpen(); };
+}
+(function(){
+  var hook=function(){
+    if(typeof window.renderProjectPicker!=='function')return false;
+    if(window.renderProjectPicker.__cdo)return true;
+    var orig=window.renderProjectPicker;
+    var wrapped=function(){ var r=orig.apply(this,arguments); try{ setTimeout(tile,30); }catch(e){} return r; };
+    wrapped.__cdo=1; wrapped.__fin=orig.__fin; wrapped.__cos=orig.__cos;
+    window.renderProjectPicker=wrapped; try{ renderProjectPicker=wrapped; }catch(e){}
+    return true;
+  };
+  if(!hook()){ var n=0, iv=setInterval(function(){ if(hook()||++n>40)clearInterval(iv); },120); }
+  setTimeout(tile,1500); setTimeout(tile,3500); setInterval(tile,4000);
+})();
+})();
+
+</script>
+<script id="simpMod">
+/* ==================================================================
+   SETTINGS ▸ Procurement & Store imports — one ERP file per register,
+   taken only for the rows that carry this project's name in column C.
+   ================================================================== */
+(function(){
+'use strict';
+function E(id){ return document.getElementById(id); }
+function X(s){ try{ return esc(s); }catch(e){ return String(s==null?'':s); } }
+function T(m){ try{ toast(m); }catch(e){} }
+var LABEL={prdr:'PR',po:'PO',igp:'IGP',grn:'GRN',issue:'Store Issuance (Material Out)'};
+var pending='';
+/* the locks of these two registers are worked from this card, not from the sheets */
+var LOCKS=[{k:'proc',l:'Procurement (PR / PO / IGP / GRN)'},{k:'storeout',l:'Material Out (Store Issuance)'}];
+window.LK_IN_SETTINGS={proc:1,storeout:1};
+function fmtAt(t){ try{ return fmtShort(iso(new Date(t))); }catch(e){ return ''; } }
+function paintLocks(){
+  var box=E('siLocks'); if(!box)return;
+  var h='<div style="font-size:.78rem;font-weight:800;color:var(--navy);margin-bottom:2px">\u{1F512} Sheet locks</div>'+
+        '<div style="font-size:.72rem;color:var(--muted)">A locked sheet can be read, printed and exported, but nothing on it can be added, edited or deleted by hand. The file imports above always go through (they ask for the password).</div>';
+  LOCKS.forEach(function(x){
+    var lk=null; try{ lk=lkGet(x.k); }catch(e){}
+    h+='<div class="si-lk"><b>'+X(x.l)+'</b>'+
+       '<span class="si-note">'+(lk?('\u{1F512} Locked'+(lk.by?(' by '+X(lk.by)):'')+(lk.at?(' \u00B7 '+X(fmtAt(lk.at))):'')):'\u{1F513} Open \u2014 the sheet can be edited by hand')+'</span>'+
+       '<button type="button" class="ghost" data-silk="'+x.k+'" style="padding:5px 12px;font-size:.78rem;font-weight:700'+(lk?';background:var(--navy);color:#fff;border-color:var(--navy)':'')+'">'+(lk?'\u{1F513} Unlock':'\u{1F512} Save &amp; Lock')+'</button></div>';
+  });
+  box.innerHTML=h;
+  box.querySelectorAll('[data-silk]').forEach(function(b){ b.onclick=async function(){
+    try{ if(typeof roBlock==='function'&&roBlock())return; }catch(e){}
+    try{ await lkToggle(b.dataset.silk); }catch(e){ console.warn(e); }
+    paintLocks();
+  }; });
+}
+function projName(){ try{ return String((S.settings&&S.settings.project)||(PROJ&&PROJ.name)||'').trim(); }catch(e){ return ''; } }
+/* ---- what the PR / Demands count is made of ---- */
+window.pcPrWhy=function(docs){
+  try{
+    var byP={}, byY={}, byNo={};
+    (docs||[]).forEach(function(o){
+      var pn=String(o.proj||'').trim()||'(blank)', y=String(o.year||'').trim()||'(no year)';
+      byP[pn]=(byP[pn]||0)+1; byY[y]=(byY[y]||0)+1;
+      var k=String(o.pr||'').trim().toLowerCase(); (byNo[k]=byNo[k]||[]).push(pn+' / '+y);
+    });
+    var li=function(m){ return Object.keys(m).sort(function(a,b){ return m[b]-m[a]; }).map(function(k){ return X(k)+' <b>'+m[k]+'</b>'; }).join(' \u00B7 '); };
+    var twice=Object.keys(byNo).filter(function(k){ return byNo[k].length>1; });
+    var h='<div style="margin-top:6px;padding:8px 10px;background:#f6f9fc;border:1px solid #dbe5ee;border-radius:8px;font-size:.74rem;color:#33475b">'+
+      '<b>'+(docs||[]).length+' PRs</b> are counted like this \u2014 by Sub Segment (column C): '+(li(byP)||'\u2014')+
+      '<br>by year: '+(li(byY)||'\u2014');
+    if(twice.length){
+      h+='<br><span style="color:#b02a2a"><b>'+twice.length+' PR number(s) counted more than once</b> (same number under two names or years): '+
+         twice.slice(0,40).map(function(k){ return X(k)+' ['+X(byNo[k].join(' | '))+']'; }).join('; ')+(twice.length>40?' \u2026':'')+'</span>';
+    }
+    var pn=projName(); var other=Object.keys(byP).filter(function(k){ try{ return pcKey(k)!==pcKey(pn); }catch(e){ return k!==pn; } });
+    if(pn&&other.length)h+='<br><span style="color:#8a6d1a">Names other than \u201C'+X(pn)+'\u201D can be taken out in Settings \u25B8 Procurement &amp; Store imports \u25B8 Rows by Sub Segment.</span>';
+    return h+'</div>';
+  }catch(e){ return ''; }
+};
+/* ---- rows on record by Sub Segment, with a way to take a wrong name out ---- */
+function paintSegs(){
+  var box=E('siSegs'); if(!box)return;
+  var P; try{ P=procState(); }catch(e){ return; }
+  var pn=projName(), m={}, KS=['prdr','po','igp','grn'], LB={prdr:'PR',po:'PO',igp:'IGP',grn:'GRN'};
+  KS.forEach(function(k){ (P[k]||[]).forEach(function(r){ var n=String(r.proj||'').trim()||'(blank)'; m[n]=m[n]||{prdr:0,po:0,igp:0,grn:0,prs:{}}; m[n][k]++; if(k==='prdr'&&r.pr)m[n].prs[String(r.pr).trim()]=1; }); });
+  var names=Object.keys(m).sort(function(a,b){ return (m[b].prdr+m[b].po+m[b].igp+m[b].grn)-(m[a].prdr+m[a].po+m[a].igp+m[a].grn); });
+  if(!names.length){ box.innerHTML=''; return; }
+  var h='<div style="font-size:.78rem;font-weight:800;color:var(--navy);margin:12px 0 2px">\u{1F4CB} Rows by Sub Segment (column C)</div>'+
+        '<div style="font-size:.72rem;color:var(--muted)">Every name here is counted in the Procurement dashboard. Only <b>\u201C'+X(pn)+'\u201D</b> belongs to this project \u2014 any other name can be taken out (its rows are kept aside, a fresh import brings them back if needed).</div>';
+  names.forEach(function(n){
+    var c=m[n], own=false; try{ own=pcKey(n)===pcKey(pn); }catch(e){ own=(n===pn); }
+    h+='<div class="si-lk"><b style="min-width:220px'+(own?';color:#1f8f4e':'')+'">'+(own?'\u2713 ':'')+X(n)+'</b>'+
+       '<span class="si-note">PR <b>'+Object.keys(c.prs).length+'</b> ('+c.prdr+' lines) \u00B7 PO <b>'+c.po+'</b> \u00B7 IGP <b>'+c.igp+'</b> \u00B7 GRN <b>'+c.grn+'</b></span>'+
+       (own?'<span style="font-size:.72rem;color:#1f8f4e;font-weight:700">this project</span>':'<button type="button" class="ghost" data-siseg="'+X(n)+'" style="padding:5px 12px;font-size:.78rem;color:var(--bad);border-color:#e3bcb7">\u2715 Take out</button>')+'</div>';
+  });
+  box.innerHTML=h;
+  box.querySelectorAll('[data-siseg]').forEach(function(b){ b.onclick=async function(){
+    var n=b.dataset.siseg;
+    try{ if(typeof roBlock==='function'&&roBlock())return; }catch(e){}
+    if(typeof requireEditPass==='function'&&!(await requireEditPass('Enter password to take out the rows of \u201C'+n+'\u201D:')))return;
+    if(typeof uiConfirm==='function'&&!(await uiConfirm('Take every PR / PO / IGP / GRN row of \u201C'+n+'\u201D out of this project? They are kept aside; a fresh import brings them back.','Take out')))return;
+    var P=procState(), moved=0; P.other=P.other||{}; var park=P.other['__seg:'+n]=P.other['__seg:'+n]||{prdr:[],po:[],igp:[],grn:[]};
+    KS.forEach(function(k){ var keep=[]; (P[k]||[]).forEach(function(r){ var rn=String(r.proj||'').trim()||'(blank)'; if(rn===n){ park[k].push(r); moved++; } else keep.push(r); }); P[k]=keep; });
+    P.at=Date.now(); try{ P.by=(currentUser?currentUser.name:''); }catch(e){}
+    try{ save(true); }catch(e){} try{ if(window.cloudPushExtras)cloudPushExtras(); }catch(e){} try{ if(typeof renderProc==='function')renderProc(); }catch(e){}
+    T('\u2715 '+moved+' row(s) of \u201C'+n+'\u201D taken out.'); paint();
+  }; });
+}
+function paint(){
+  var n=E('siProjNote'), c=E('siCounts'); if(!n)return;
+  var pn=projName();
+  n.innerHTML=pn?('Rows are taken only where column C (Sub Segment Name / Issued Sub Segment) reads exactly <b>“'+X(pn)+'”</b> — the Project Name above. Change that name if the ERP writes it differently.'):'<span style="color:#b02a2a">Set the Project Name above first — the import matches column C against it.</span>';
+  try{ var P=procState(), st=storeState();
+    c.innerHTML='On record now: PR <b>'+(P.prdr||[]).length+'</b> · PO <b>'+(P.po||[]).length+'</b> · IGP <b>'+(P.igp||[]).length+'</b> · GRN <b>'+(P.grn||[]).length+'</b> · Material Out <b>'+(st.out||[]).length+'</b>'+(P.at?(' · last import '+wfFmtTs(P.at)+(P.by?(' by '+X(P.by)):'')):''); }catch(e){}
+  paintLocks(); paintSegs();
+}
+function wire(){
+  var card=E('siCard'); if(!card||card.__wired)return; card.__wired=1;
+  card.querySelectorAll('[data-simp]').forEach(function(b){ b.onclick=async function(){
+    if(!projName()){ T('Set the Project Name first.'); return; }
+    try{ if(typeof roBlock==='function'&&roBlock())return; }catch(e){}
+    /* the sheet lock guards hand edits on the sheet — this import is the admin's own channel */
+    if(typeof requireEditPass==='function'&&!(await requireEditPass('Enter password to import the '+LABEL[b.dataset.simp]+' file:')))return;
+    pending=b.dataset.simp; var f=E('siFile'); f.value=''; f.click();
+  }; });
+  E('siFile').addEventListener('change',async function(e){
+    var f=e.target.files[0]; e.target.value=''; var kind=pending; pending=''; if(!f||!kind)return;
+    window.__pcStrictProj=projName(); window.__pcStrictSkipped=0; window.__pcStrictSeen={};
+    T('Reading '+f.name+' …');
+    try{
+      if(kind==='issue'){ await stImportIssue(f); }
+      else { PC_REPLACE=0; await procImportFile(f,false,kind); }
+    }catch(err){ console.warn(err); T('⚠ Could not read that file — please send the ERP Excel export.'); }
+    finally{ window.__pcStrictProj=''; }
+    paint();
+  });
+}
+/* a lock banner already sitting on those two sheets loses its Unlock button — the lock is worked from here */
+function fixVeils(){
+  LOCKS.forEach(function(x){
+    var pane=E('tab-'+x.k); if(!pane)return;
+    pane.querySelectorAll('.lk-veil .lk-unlock').forEach(function(u){
+      var sp=document.createElement('span'); sp.style.cssText='font-size:.76rem;font-weight:700;color:#8a6d1a';
+      sp.textContent='Unlock from Settings \u25B8 Procurement & Store imports'; u.replaceWith(sp);
+    });
+  });
+}
+setInterval(function(){ wire(); fixVeils(); if(E('tab-setup')&&E('tab-setup').classList.contains('on'))paint(); },1500);
+setTimeout(function(){ wire(); paint(); },2000);
+document.addEventListener('click',function(e){ if(e.target&&e.target.closest&&e.target.closest('[data-tab="setup"],[data-nav="setup"]'))setTimeout(paint,300); },true);
 })();
 
 </script>
