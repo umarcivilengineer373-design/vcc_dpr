@@ -7196,6 +7196,17 @@ input.bd-drop{appearance:none;-webkit-appearance:none;cursor:text;padding-right:
   </div>
 </section>
 
+<section class="tabpane" id="tab-ctrprog">
+  <div class="card">
+    <div class="card-h"><h2>Contractor Progress</h2><span class="hint">what each sub contractor did, work order by work order, day by day &mdash; from the Daily Progress Sheet</span>
+      <span class="spacer"></span>
+      <button class="ghost" id="cpXlsx" style="padding:5px 12px;font-size:.78rem">&#11015; Excel</button>
+      <button class="primary" id="cpPrint" style="padding:5px 14px;font-size:.78rem">&#128424; Print</button>
+    </div>
+    <div class="card-b" id="cpBody"></div>
+  </div>
+</section>
+
 <section class="tabpane" id="tab-ceorep">
   <div class="card">
     <div class="card-h"><h2>CEO Daily Report</h2><span class="hint">the one-page Executive Report &mdash; procurement, store, man power, work done and site payments, all worked out from the live records</span>
@@ -17772,6 +17783,7 @@ async function goTab(name){
   if(name==='mpr')renderMPR();
   if(name==='dailyrep'&&window.renderDailyRep)renderDailyRep();
   if(name==='ceorep'&&window.renderCeoRep)renderCeoRep();
+  if(name==='ctrprog'&&window.renderCtrProg)renderCtrProg();
   if(name==='setup')renderSetup();
   if(name==='exec'){ exDay=exToday(); renderExec(); }
   if(name==='report'){if(repSub==='conc')renderConcReport();else renderReport()}
@@ -26861,7 +26873,7 @@ function renderMpHistory(){
 /* ---- Add Progress modal (date-wise entry form) ---- */
 $('addProg').onclick=()=>openProgModal();
 let pmRows=[];let pmEdit=false;
-function pmBlank(){return {group:'',sub:'',boqId:'',floor:'',no:'',len:'',br:'',ht:'',qty:0}}
+function pmBlank(){return {group:'',sub:'',boqId:'',floor:'',vendor:'',wo:'',no:'',len:'',br:'',ht:'',qty:0}}
 async function openProgModal(edit){
   if(!S.boq.length){toast('Import your BOQ in Setup first.');goTab('setup');return}
   /* + New only ADDS rows (to the date picked inside the form), so it needs no password.
@@ -26876,7 +26888,8 @@ async function openProgModal(edit){
       var _bf=_b?String(_b.floor||'').trim():'';
       var _fl=p.floor||'';
       var _manual=(p.floorManual===true)||(!!_fl && _fl!==_bf);
-      return {group:p.group||'',sub:p.sub||'',boqId:p.boqId||'',floor:_fl,floorManual:_manual,no:p.no||'',len:p.len||'',br:p.br||'',ht:p.ht||'',qty:(p.qty!=null?p.qty:0)};
+      return {group:p.group||'',sub:p.sub||'',boqId:p.boqId||'',floor:_fl,floorManual:_manual,no:p.no||'',len:p.len||'',br:p.br||'',ht:p.ht||'',qty:(p.qty!=null?p.qty:0),
+              vendor:String(p.vendor||''),wo:String(p.wo||'')};
     }); pmRows=ex.length?ex.concat([pmBlank()]):[pmBlank(),pmBlank(),pmBlank()]; $('pmDate').value=curDate; }
   else { pmRows=[pmBlank(),pmBlank(),pmBlank()]; $('pmDate').value=iso(new Date()); }
   renderPmTable();
@@ -34241,7 +34254,14 @@ function procIgpHTML(){
 }
 function procGrnHTML(){
   var P=procState();
-  var rows=pcApply((P.grn||[]).map(function(r){return Object.assign({},r,{poAmt:0,grnVal:r.value||0,status:''})}),['item','grn','igp','vendor','group']);
+  /* a GRN line is Closed once its receipt sits in the store's Material In (⬇ From GRN);
+     until then it is Pending — the store cannot issue what it has not taken in */
+  var inStore={};
+  try{ var _st=storeState(); (_st.in||[]).forEach(function(x){ if(x&&x.grnKey)inStore[x.grnKey]=1; }); }catch(e){}
+  var grnKeyOf=function(r){ return 'grn:'+String(r.grn||'')+'|'+String(r.item||'').trim()+'|'+String(r.grnDate||''); };
+  var rows=pcApply((P.grn||[]).map(function(r){ var erp=String(r.status||'').trim();
+      return Object.assign({},r,{poAmt:0,grnVal:r.value||0,erpStatus:erp,status:(inStore[grnKeyOf(r)]?'Closed':'Pending')}); }),['item','grn','igp','vendor','group']);
+  var nClosed=rows.filter(function(r){ return r.status==='Closed'; }).length, nPend=rows.length-nClosed;
   var q=0,v=0;
   var body=rows.map(function(r,i){ q+=(+r.qty||0); v+=(+r.value||0);
     return '<tr><td class="dim" style="text-align:center">'+(i+1)+'</td>'+
@@ -34251,9 +34271,10 @@ function procGrnHTML(){
       '<td style="font-size:.78rem">'+esc(r.item)+'</td><td style="font-size:.72rem">'+esc(r.group||'')+'</td>'+
       '<td style="text-align:center;font-size:.74rem">'+esc(r.unit||'')+'</td><td class="num">'+fmt(r.qty)+'</td>'+
       '<td class="num">'+woMoney(r.rate)+'</td><td class="num" style="font-weight:700">'+woMoney(r.value)+'</td>'+
-      '<td style="font-size:.74rem">'+esc(r.wh||'')+'</td><td style="font-size:.74rem">'+esc(r.status||'')+'</td></tr>';
+      '<td style="font-size:.74rem">'+esc(r.wh||'')+'</td><td style="white-space:nowrap"><span style="display:inline-block;padding:2px 9px;border-radius:999px;font-size:.68rem;font-weight:800;color:#fff;background:'+(r.status==='Closed'?'#1f8f4e':'#c98a1b')+'" title="'+(r.status==='Closed'?'received into the store (Material In)':'not yet taken into the store — Store ▸ Material In ▸ From GRN')+'">'+r.status+'</span>'+
+        (r.erpStatus?('<div style="font-size:.64rem;color:var(--muted)">ERP: '+esc(r.erpStatus)+'</div>'):'')+'</td></tr>';
   }).join('');
-  if(body)body+='<tr style="background:#f2f5f8;font-weight:700"><td colspan="9" style="text-align:right">TOTAL</td><td class="num">'+fmt(q)+'</td><td></td><td class="num">'+woMoney(v)+'</td><td colspan="2"></td></tr>';
+  if(body)body+='<tr style="background:#f2f5f8;font-weight:700"><td colspan="9" style="text-align:right">TOTAL</td><td class="num">'+fmt(q)+'</td><td></td><td class="num">'+woMoney(v)+'</td><td></td><td style="font-size:.72rem;white-space:nowrap"><span style="color:#1f8f4e">'+nClosed+' closed</span> · <span style="color:#c98a1b">'+nPend+' pending</span></td></tr>';
   return pcTable(['#','Project','GRN #','GRN Date','IGP #','Vendor','Item','Group','Unit','Qty','Rate','Value','Warehouse','Status'],body,
     ['center','left','left','left','left','left','left','left','center','right','right','right','left','left']);
 }
@@ -35080,7 +35101,8 @@ function renderProc(){
             ['nogrn',PC_GAP_DEF.nogrn.tab,_gp.nogrn],
             ['rep','📅 Report',''],
             ['prdet','🔎 PR Detail',counts.prdet],['podet','🔎 PO Detail',counts.podet],
-            ['prdr','📝 PR',counts.prdr],['po','📄 PO',counts.po],['igp','🚚 IGP',counts.igp],['grn','📦 GRN',counts.grn]];
+            ['prdr','📝 PR',counts.prdr],['po','📄 PO',counts.po],['igp','🚚 IGP',counts.igp],['grn','📦 GRN',counts.grn],
+            ['grnpay','💰 Balance Payable (GRN)',(window.__gpCount?window.__gpCount():'')]];
   $('pcTabs').innerHTML=tabs.map(function(t){
     var on=PC_VIEW===t[0];
     return '<button data-pv="'+t[0]+'" style="background:'+(on?'var(--navy)':'#fff')+';color:'+(on?'#fff':'var(--navy)')+';border:1px solid '+(on?'var(--navy)':'var(--border2)')+';border-radius:9px;padding:6px 13px;font-size:.78rem;font-weight:700;cursor:pointer">'+t[1]+
@@ -35099,6 +35121,7 @@ function renderProc(){
   var html = PC_VIEW==='rep'?procRepHTML() :
              PC_GAP_DEF[PC_VIEW]?procGapHTML(PC_VIEW) :
              PC_VIEW==='flow'?procFlowHTML() : PC_VIEW==='prdet'?procDetHTML('pr') : PC_VIEW==='podet'?procDetHTML('po') :
+             PC_VIEW==='grnpay'?(window.procGrnPayHTML?procGrnPayHTML():'') :
              PC_VIEW==='prdr'?procPrHTML() : PC_VIEW==='po'?procPoHTML() : PC_VIEW==='igp'?procIgpHTML() : PC_VIEW==='grn'?procGrnHTML() : procSumHTML();
   var _detKind=(PC_VIEW==='prdet')?'pr':((PC_VIEW==='podet')?'po':'');
   if(_detKind && $('pcDetQ') && $('pcDetOut') && PC_DET_MOUNTED===_detKind){
@@ -35109,6 +35132,7 @@ function renderProc(){
     PC_DET_MOUNTED=_detKind;
     if(_detKind)pcDetWire(_detKind);
     try{ if(window.pcImpWire)pcImpWire(); }catch(e){}
+    try{ if(PC_VIEW==='grnpay'&&window.procGrnPayWire)procGrnPayWire(); }catch(e){}
   }
   /* the Report sheet: the date box and the six outstanding pickers */
   try{ if(PC_VIEW==='rep')pcRepWire(); }catch(e){}
@@ -36235,6 +36259,7 @@ function dprDocHTML(D){
     h+='</table>';
   } else h+='<div class="empty">No measured quantities today.</div>';
   h+='</div>';
+  try{ if(window.cpDprSection)h+=window.cpDprSection(D)||''; }catch(e){}
 
   if(conc.length){
     h+=`<h3 class="sec">Concrete Record</h3><div class="secbox"><table class="grid">
@@ -43851,7 +43876,8 @@ var NAV={
     {label:'Efficiency Report — Execution', tab:'effrep'},
     {label:'Board Presentation (PPT)', tab:'board'},
     {label:'Daily Dashboard Report', tab:'dailyrep'},
-    {label:'CEO Daily Report', tab:'ceorep'}
+    {label:'CEO Daily Report', tab:'ceorep'},
+    {label:'Contractor Progress (WO wise)', tab:'ctrprog'}
   ]},
   targets:{subs:[
     {label:'Targets (Work Plan)', tab:'plan'},
@@ -44385,7 +44411,7 @@ var SK_ICON={
   plantconc:'🚚', rmcmat:'🧪', report:'📊', bvac:'📈', itemprog:'📶', manpow:'👷',
   matstat:'🧾', dpr:'📄', dprmulti:'🗂', dprmonth:'🗓', mpr:'📅',
   stkrep:'📚', strep:'📦', board:'🖥',
-  dailyrep:'📆', ceorep:'📋',
+  dailyrep:'📆', ceorep:'📋', ctrprog:'👷',
   plan:'🎯', dash:'📊', bplan:'🗺',
   exec:'🏛', drwr:'📥', drwi:'📤', rfi:'❓', eest:'🧮', bwsch:'🗓', lda:'🏛',
   sir:'📝', cos:'✉', cyl:'🧪', piles:'🏗', proc:'🛒', qaqc:'🔬',
@@ -58577,6 +58603,489 @@ function run(quiet){
 setTimeout(function(){ run(false); },12000);
 setInterval(function(){ run(true); },90000);
 window.dedupRegisters=function(){ return run(false); };
+})();
+
+</script>
+<script id="ctrMod">
+/* ==================================================================
+   CONTRACTOR PROGRESS — what each sub contractor did, work order by
+   work order, day by day. Everything comes from the Daily Progress
+   Sheet: the Sub Contractor / Vendor and Work Order # written on each
+   measurement line.
+   ================================================================== */
+(function(){
+'use strict';
+function E(id){ return document.getElementById(id); }
+function X(s){ try{ return esc(s); }catch(e){ return String(s==null?'':s); } }
+function N(v){ var n=parseFloat(String(v==null?'':v).replace(/[, ]/g,'')); return isFinite(n)?n:0; }
+function F(n){ try{ return fmt(n); }catch(e){ return String(Math.round(n*100)/100); } }
+function ISO(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function dM(s){ try{ return fmtMed(s); }catch(e){ return s; } }
+function dS(s){ try{ return fmtShort(s); }catch(e){ return s; } }
+function T(m){ try{ toast(m); }catch(e){} }
+
+var CP={from:'',to:'',vendor:'',wo:'',view:'ctr',open:{},mode:'day',d:''};
+function cpDay(){ if(!/^\d{4}-\d{2}-\d{2}$/.test(CP.d||''))CP.d=ISO(new Date()); return CP.d; }
+function cpDefaults(){
+  if(!CP.to)CP.to=ISO(new Date());
+  if(!CP.from){ var p=CP.to.split('-'); CP.from=p[0]+'-'+p[1]+'-01'; }
+}
+var NOV='(no contractor on the line)';
+/* every measurement line in the window, with what it needs */
+function cpLines(){
+  CP_RATE={};
+  var out=[], byId={};
+  try{ (S.boq||[]).forEach(function(b){ byId[b.id]=b; }); }catch(e){}
+  var days=Object.keys(S.days||{}).filter(function(k){ return /^\d{4}-\d{2}-\d{2}$/.test(k); }).sort();
+  days.forEach(function(d){
+    if(d<CP.from||d>CP.to)return;
+    ((S.days[d]||{}).progress||[]).forEach(function(p){
+      var v=String(p.vendor||'').trim()||NOV, w=String(p.wo||'').trim()||'—';
+      if(CP.vendor&&v!==CP.vendor)return;
+      if(CP.wo&&w!==CP.wo)return;
+      var b=byId[p.boqId]||{};
+      out.push({d:d,vendor:v,wo:w,boqId:p.boqId,item:b.name||'(item removed from BOQ)',sub:b.sub||'',floor:p.floor||b.floor||'',unit:b.unit||'',bq:N(b.qty),
+        no:p.no,len:p.len,br:p.br,ht:p.ht,qty:N(p.qty),rate:(function(){ var r=cpRate(w,b); return r.rate; })(),rsrc:cpRate(w,b).src,boqRate:N(b.rate)});
+    });
+  });
+  return out;
+}
+/* the rate a line is paid at: the work order's own rate for that item (matched on the
+   item name, then group / sub head), else the BOQ rate — the source is remembered */
+var CP_RATE={};
+function cpNorm(s){ return String(s==null?'':s).toLowerCase().replace(/[^a-z0-9]+/g,' ').trim(); }
+function cpRate(wo,b){
+  b=b||{}; var k=wo+'|'+(b.id||''); if(CP_RATE[k])return CP_RATE[k];
+  var out={rate:N(b.rate),src:N(b.rate)?'boq':''};
+  try{
+    var w=(S.workOrders||[]).filter(function(x){ return String(x.serial||'').trim()===String(wo||'').trim(); })[0];
+    var its=(w&&Array.isArray(w.items))?w.items:[];
+    var nm=cpNorm(b.name), g=cpNorm(b.group), sb=cpNorm(b.sub);
+    var exact=its.filter(function(it){ return cpNorm(it.item)===nm; });
+    if(exact.length>1){ var e2=exact.filter(function(it){ return cpNorm(it.l2)===g||cpNorm(it.l1)===sb||cpNorm(it.wgs)===sb; }); if(e2.length)exact=e2; }
+    var hit=exact[0];
+    if(!hit&&nm){ hit=its.filter(function(it){ var t=cpNorm(it.item); return t&&(t.indexOf(nm)===0||nm.indexOf(t)===0); })[0]; }
+    if(hit){ var r=N(hit.rate)||(N(hit.qty)?N(hit.value)/N(hit.qty):0); if(r){ out={rate:r,src:'wo'}; } }
+  }catch(e){}
+  CP_RATE[k]=out; return out;
+}
+function cpCum(boqId,upto){ try{ return cumQty(boqId,upto,false); }catch(e){ return 0; } }
+function cpWoTitle(wo){
+  try{ var w=(S.workOrders||[]).filter(function(x){ return String(x.serial||'').trim()===wo; })[0]; return w?String(w.title||w.subSeg||''):''; }catch(e){ return ''; }
+}
+function cpVendors(){ var s={}; try{ Object.keys(S.days||{}).forEach(function(d){ ((S.days[d]||{}).progress||[]).forEach(function(p){ var v=String(p.vendor||'').trim(); if(v)s[v]=1; }); }); }catch(e){} return Object.keys(s).sort(); }
+function cpWos(vendor){ var s={}; try{ Object.keys(S.days||{}).forEach(function(d){ ((S.days[d]||{}).progress||[]).forEach(function(p){ var v=String(p.vendor||'').trim()||NOV; if(vendor&&v!==vendor)return; var w=String(p.wo||'').trim(); if(w)s[w]=1; }); }); }catch(e){} return Object.keys(s).sort(); }
+
+/* ---- grouped: vendor → work order → item, with the days under each item ---- */
+function cpGroup(lines){
+  var V={}, vo=[];
+  lines.forEach(function(l){
+    if(!V[l.vendor]){ V[l.vendor]={name:l.vendor,qty:0,val:0,n:0,days:{},W:{},wo:[]}; vo.push(l.vendor); }
+    var v=V[l.vendor]; v.n++; v.qty+=l.qty; v.val+=l.qty*l.rate; v.days[l.d]=1;
+    if(!v.W[l.wo]){ v.W[l.wo]={wo:l.wo,title:cpWoTitle(l.wo),qty:0,val:0,n:0,days:{},I:{},io:[]}; v.wo.push(l.wo); }
+    var w=v.W[l.wo]; w.n++; w.qty+=l.qty; w.val+=l.qty*l.rate; w.days[l.d]=1;
+    var ik=l.boqId+'|'+l.floor;
+    if(!w.I[ik]){ w.I[ik]={boqId:l.boqId,item:l.item,sub:l.sub,floor:l.floor,unit:l.unit,bq:l.bq,rate:l.rate,rsrc:l.rsrc,qty:0,n:0,days:{},lines:[]}; w.io.push(ik); }
+    var it=w.I[ik]; it.n++; it.qty+=l.qty; it.days[l.d]=1; it.lines.push(l);
+  });
+  vo.sort(function(a,b){ return a===NOV?1:(b===NOV?-1:a.localeCompare(b)); });
+  return {V:V,vo:vo};
+}
+var CSS='.cp-kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:0 0 14px}'+
+ '.cp-kpi .b{background:#fff;border:1px solid var(--border);border-left:4px solid #1d5a8f;border-radius:10px;padding:9px 12px}'+
+ '.cp-kpi .n{font-size:1.25rem;font-weight:800;color:var(--navy)}.cp-kpi .l{font-size:.68rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700}'+
+ '.cp-v{border:1px solid var(--border);border-radius:12px;margin:0 0 14px;background:#fff;overflow:hidden}'+
+ '.cp-vh{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:10px 14px;background:var(--navy);color:#fff}'+
+ '.cp-vh h3{margin:0;font-size:.95rem;font-weight:800}.cp-vh .m{font-size:.74rem;opacity:.85}'+
+ '.cp-w{padding:8px 14px 12px;border-top:1px solid var(--border)}'+
+ '.cp-wh{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-weight:800;color:var(--navy);font-size:.86rem;margin:6px 0 6px}'+
+ '.cp-wh .t{font-weight:600;color:var(--muted);font-size:.76rem}'+
+ '.cp-t{width:100%;border-collapse:collapse;font-size:.8rem}.cp-t th{background:#eef2f6;color:var(--navy);font-size:.68rem;text-transform:uppercase;letter-spacing:.04em;padding:6px 8px;text-align:left;border:1px solid #d5dfea}'+
+ '.cp-t td{padding:5px 8px;border:1px solid #e3eaf2;vertical-align:top}.cp-t td.n,.cp-t th.n{text-align:right;white-space:nowrap}'+
+ '.cp-t tr.day td{background:#f7fafd;color:#3d5570;font-size:.76rem}.cp-t tr.tot td{background:#f2f5f8;font-weight:800}'+
+ '.cp-d{width:100%;border-collapse:collapse;font-size:.78rem;margin:0 0 12px}.cp-d th{background:#eef2f6;color:var(--navy);font-size:.68rem;text-transform:uppercase;padding:6px 8px;text-align:left;border:1px solid #d5dfea}.cp-d td{padding:5px 8px;border:1px solid #e3eaf2}.cp-d td.n{text-align:right;white-space:nowrap}'+
+ '.cp-dh{font-weight:800;color:var(--navy);margin:12px 0 6px;font-size:.9rem}'+
+ '.cp-tg{background:#fff;border:1px solid var(--border2);border-radius:7px;padding:2px 8px;font-size:.7rem;cursor:pointer;color:var(--navy);font-weight:700}'+
+ '.cp-dpr table.grid{width:100%;border-collapse:collapse;font-size:.8rem;margin:6px 0 10px}.cp-dpr table.grid th{background:#eef2f6;color:var(--navy);font-size:.68rem;text-transform:uppercase;letter-spacing:.04em;padding:6px 8px;text-align:left;border:1px solid #d5dfea}.cp-dpr table.grid td{padding:5px 8px;border:1px solid #e3eaf2;vertical-align:top}.cp-dpr td.num{text-align:right;white-space:nowrap}.cp-dpr td.ctr{text-align:center}.cp-dpr tr.mp-total td{background:#f2f5f8;font-weight:800}.cp-dpr .empty{color:var(--faint);padding:12px;font-size:.85rem}'+
+ '.cp-bar{height:6px;background:#e5ecf4;border-radius:4px;overflow:hidden;min-width:70px}.cp-bar i{display:block;height:100%;background:#1d5a8f}';
+function cpCss(){ if(E('cpCss'))return; var s=document.createElement('style'); s.id='cpCss'; s.textContent=CSS; document.head.appendChild(s); }
+
+function cpItemTable(w,withDays){
+  var h='<table class="cp-t"><thead><tr><th style="width:30%">Item</th><th>Floor</th><th>Unit</th><th class="n">BOQ Qty</th><th class="n">Done in period</th><th class="n">Rate</th><th class="n">Amount</th><th class="n">Cumulative to '+X(dS(CP.to))+'</th><th class="n">% of BOQ</th><th class="n">Days</th></tr></thead><tbody>';
+  var tq=0, ta=0;
+  w.io.forEach(function(k){ var it=w.I[k]; var cum=cpCum(it.boqId,CP.to), pct=it.bq?cum/it.bq*100:0, amt=it.qty*it.rate; tq+=it.qty; ta+=amt;
+    h+='<tr><td><b>'+X(it.item)+'</b>'+(it.sub?('<div style="font-size:.7rem;color:var(--muted)">↳ '+X(it.sub)+'</div>'):'')+'</td><td>'+X(it.floor||'—')+'</td><td>'+X(it.unit||'—')+'</td>'+
+      '<td class="n">'+(it.bq?F(it.bq):'—')+'</td><td class="n"><b>'+F(it.qty)+'</b></td>'+
+      '<td class="n" title="'+(it.rsrc==='wo'?'rate from the work order':(it.rsrc==='boq'?'no matching line on the work order — BOQ rate used':'no rate'))+'">'+(it.rate?F(it.rate):'—')+(it.rsrc==='wo'?'<div style="font-size:.62rem;color:#1c7a42;font-weight:800">WO rate</div>':(it.rsrc==='boq'?'<div style="font-size:.62rem;color:#b8860b;font-weight:800">BOQ rate</div>':''))+'</td>'+
+      '<td class="n"><b>'+(amt?F(Math.round(amt)):'—')+'</b></td><td class="n">'+F(cum)+'</td>'+
+      '<td class="n"><div style="display:flex;align-items:center;gap:6px;justify-content:flex-end"><div class="cp-bar"><i style="width:'+Math.min(100,pct)+'%"></i></div>'+(it.bq?pct.toFixed(1)+'%':'—')+'</div></td><td class="n">'+Object.keys(it.days).length+'</td></tr>';
+    if(withDays){ it.lines.slice().sort(function(a,b){ return a.d.localeCompare(b.d); }).forEach(function(l){
+      var dims=[l.no,l.len,l.br,l.ht].map(function(v){ return (v===''||v==null)?'–':F(N(v)); }).join(' × ');
+      h+='<tr class="day"><td style="padding-left:22px">'+X(dM(l.d))+'</td><td colspan="3" style="color:#6d8199">No × L × B × H: '+X(dims)+'</td><td class="n">'+F(l.qty)+'</td><td class="n">'+(l.rate?F(l.rate)+' <span style="font-size:.58rem;color:'+(l.rsrc==='wo'?'#1c7a42':'#b8860b')+';font-weight:800">'+(l.rsrc==='wo'?'WO':'BOQ')+'</span>':'')+'</td><td class="n">'+(l.rate?F(Math.round(l.qty*l.rate)):'')+'</td><td colspan="3"></td></tr>'; }); }
+  });
+  h+='<tr class="tot"><td colspan="4">Work order total — '+w.n+' line'+(w.n===1?'':'s')+' on '+Object.keys(w.days).length+' day'+(Object.keys(w.days).length===1?'':'s')+'</td><td class="n">'+F(tq)+'</td><td></td><td class="n">Rs '+F(Math.round(ta))+'</td><td colspan="3"></td></tr>';
+  return h+'</tbody></table>';
+}
+function cpGroupedHTML(lines){
+  var G=cpGroup(lines);
+  if(!G.vo.length)return '<div style="color:var(--faint);padding:14px;font-size:.85rem">No measurement with a contractor in this window.</div>';
+  return G.vo.map(function(vk){ var v=G.V[vk]; var open=CP.open[vk]!==false;
+    return '<div class="cp-v"><div class="cp-vh"><h3>👷 '+X(v.name)+'</h3><span class="m">'+v.wo.length+' work order'+(v.wo.length===1?'':'s')+' · '+v.n+' line'+(v.n===1?'':'s')+' · '+Object.keys(v.days).length+' working day'+(Object.keys(v.days).length===1?'':'s')+(v.val?(' · amount Rs '+F(Math.round(v.val))):'')+'</span>'+
+      '<span style="margin-left:auto"></span><button class="cp-tg no-print" data-cpv="'+X(vk)+'">'+(open?'▾ hide':'▸ show')+'</button></div>'+
+      (open?v.wo.map(function(wk){ var w=v.W[wk]; var od=!!CP.open['d|'+vk+'|'+wk];
+        return '<div class="cp-w"><div class="cp-wh">📄 Work Order '+X(w.wo)+(w.title?('<span class="t">— '+X(w.title)+'</span>'):'')+'<span class="t">'+Object.keys(w.days).length+' day'+(Object.keys(w.days).length===1?'':'s')+'</span>'+
+          '<button class="cp-tg no-print" data-cpd="'+X(vk)+'|'+X(wk)+'" style="margin-left:auto">'+(od?'▾ day by day':'▸ day by day')+'</button></div>'+cpItemTable(w,od)+'</div>'; }).join(''):'')+
+    '</div>'; }).join('');
+}
+/* ---- day by day: one table per date ---- */
+function cpDailyHTML(lines){
+  var D={}, dorder=[];
+  lines.forEach(function(l){ if(!D[l.d]){ D[l.d]=[]; dorder.push(l.d); } D[l.d].push(l); });
+  if(!dorder.length)return '<div style="color:var(--faint);padding:14px;font-size:.85rem">No measurement with a contractor in this window.</div>';
+  return dorder.map(function(d){ var L=D[d].slice().sort(function(a,b){ return a.vendor.localeCompare(b.vendor)||a.wo.localeCompare(b.wo)||a.item.localeCompare(b.item); }); var q=0, a=0;
+    return '<div class="cp-dh">📅 '+X(dM(d))+' <span style="font-weight:600;color:var(--muted);font-size:.76rem">· '+L.length+' line'+(L.length===1?'':'s')+' · '+[].concat.apply([],[Object.keys(L.reduce(function(a,l){ a[l.vendor]=1; return a; },{}))]).length+' contractor(s)</span></div>'+
+      '<table class="cp-d"><thead><tr><th>Sub Contractor / Vendor</th><th>WO #</th><th style="width:30%">Item</th><th>Floor</th><th>Unit</th><th class="n">No</th><th class="n">L</th><th class="n">B</th><th class="n">H</th><th class="n">Qty</th><th class="n">Rate</th><th class="n">Amount</th><th class="n">Cumulative</th></tr></thead><tbody>'+
+      L.map(function(l){ q+=l.qty; a+=l.qty*l.rate; var dd=function(v){ return (v===''||v==null)?'–':F(N(v)); };
+        return '<tr><td>'+X(l.vendor)+'</td><td>'+X(l.wo)+'</td><td><b>'+X(l.item)+'</b></td><td>'+X(l.floor||'—')+'</td><td>'+X(l.unit||'')+'</td><td class="n">'+dd(l.no)+'</td><td class="n">'+dd(l.len)+'</td><td class="n">'+dd(l.br)+'</td><td class="n">'+dd(l.ht)+'</td><td class="n"><b>'+F(l.qty)+'</b></td><td class="n">'+(l.rate?F(l.rate)+(l.rsrc==='wo'?'<div style="font-size:.6rem;color:#1c7a42;font-weight:800">WO rate</div>':'<div style="font-size:.6rem;color:#b8860b;font-weight:800">BOQ rate</div>'):'—')+'</td><td class="n"><b>'+(l.rate?F(Math.round(l.qty*l.rate)):'—')+'</b></td><td class="n">'+F(cpCum(l.boqId,d))+(l.bq?(' / '+F(l.bq)):'')+'</td></tr>'; }).join('')+
+      '<tr><td colspan="11" style="font-weight:800;background:#f2f5f8">Day total</td><td class="n" style="font-weight:800;background:#f2f5f8">Rs '+F(Math.round(a))+'</td><td style="background:#f2f5f8"></td></tr>'+
+      '</tbody></table>'; }).join('');
+}
+/* ---- one day, laid out the way the DPR reads: contractor by contractor, work order by
+   work order, every item with today's quantity, rate, amount and where it stands ---- */
+function cpDayLines(D,vendor,wo){
+  var save={from:CP.from,to:CP.to,vendor:CP.vendor,wo:CP.wo};
+  CP.from=D; CP.to=D; CP.vendor=vendor||''; CP.wo=wo||'';
+  var L=cpLines();
+  CP.from=save.from; CP.to=save.to; CP.vendor=save.vendor; CP.wo=save.wo;
+  return L;
+}
+function cpDaySheet(D,lines,forDpr){
+  var G=cpGroup(lines);
+  var th=function(t,st){ return '<th'+(st?(' style="'+st+'"'):'')+'>'+t+'</th>'; };
+  var head='<tr>'+th('Sub Contractor / Vendor','width:16%')+th('WO #','width:7%')+th('Item / Work','width:24%')+th('Floor','width:11%')+th('Unit','width:8%')+
+    th('Today','text-align:right')+th('Rate','text-align:right')+th('Amount','text-align:right')+th('Till date','text-align:right')+th('% BOQ','text-align:right;width:7%')+'</tr>';
+  if(!G.vo.length)return '<div class="empty">No contractor measurement on '+X(dM(D))+'.</div>';
+  var h='<table class="grid">'+head, gq=0, ga=0;
+  G.vo.forEach(function(vk){ var v=G.V[vk], va=0, first=true;
+    v.wo.forEach(function(wk){ var w=v.W[wk];
+      w.io.forEach(function(k){ var it=w.I[k]; var cum=cpCum(it.boqId,D), pct=it.bq?cum/it.bq*100:0, amt=it.qty*it.rate; va+=amt; gq+=it.qty; ga+=amt;
+        h+='<tr>'+'<td>'+(first?('<b>'+X(v.name)+'</b>'):'')+'</td><td class="ctr">'+X(w.wo)+'</td>'+
+          '<td><b>'+X(it.item)+'</b>'+(it.sub?('<div style="font-size:7pt;color:#5b6b7b">'+X(it.sub)+'</div>'):'')+'</td><td>'+X(it.floor||'—')+'</td><td class="ctr">'+X(it.unit||'')+'</td>'+
+          '<td class="num"><b>'+F(it.qty)+'</b></td><td class="num">'+(it.rate?F(it.rate):'—')+(it.rsrc==='wo'?'<div style="font-size:6.5pt;color:#1c7a42;font-weight:700">WO rate</div>':(it.rsrc==='boq'?'<div style="font-size:6.5pt;color:#b8860b;font-weight:700">BOQ rate</div>':''))+'</td>'+
+          '<td class="num"><b>'+(amt?F(Math.round(amt)):'—')+'</b></td><td class="num">'+F(cum)+(it.bq?('<div style="font-size:6.5pt;color:#5b6b7b">of '+F(it.bq)+'</div>'):'')+'</td>'+
+          '<td class="num">'+(it.bq?pct.toFixed(1)+'%':'—')+'</td></tr>';
+        first=false; });
+    });
+    h+='<tr class="mp-total"><td colspan="7" style="text-align:right;padding-right:8px">'+X(v.name)+' — '+v.n+' line'+(v.n===1?'':'s')+', '+v.wo.length+' work order'+(v.wo.length===1?'':'s')+' · amount today</td><td class="num">Rs '+F(Math.round(va))+'</td><td colspan="2"></td></tr>';
+  });
+  h+='<tr class="mp-total"><td colspan="7" style="text-align:right;padding-right:8px">TOTAL — '+G.vo.length+' contractor'+(G.vo.length===1?'':'s')+'</td><td class="num"><b>Rs '+F(Math.round(ga))+'</b></td><td colspan="2"></td></tr></table>';
+  return h;
+}
+/* ready-mix and other suppliers on that day, from the Concrete Record */
+function cpSupplierSheet(D){
+  var conc=[]; try{ conc=((S.days[D]||{}).concrete||[]).filter(function(c){ return c&&N(c.qty); }); }catch(e){}
+  if(!conc.length)return '';
+  var V={}, vo=[];
+  conc.forEach(function(c){ var v=String(c.vendor||'').trim()||'(no supplier)'; var m=String(c.mix||'').trim()||'—'; var k=v+'|'+m;
+    if(!V[k]){ V[k]={v:v,mix:m,n:0,q:0,unit:String(c.unit||'')}; vo.push(k); } V[k].n++; V[k].q+=N(c.qty); });
+  var tq=0, tn=0;
+  var h='<div style="font-size:7.6pt;font-weight:700;color:#33465a;text-transform:uppercase;letter-spacing:.06em;margin:6px 0 2px">Suppliers — ready-mix concrete delivered today</div>'+
+    '<table class="grid"><tr><th>Supplier</th><th>Design Mix</th><th style="text-align:right">Trips / slips</th><th>Unit</th><th style="text-align:right">Qty delivered</th></tr>';
+  vo.forEach(function(k){ var x=V[k]; tq+=x.q; tn+=x.n; h+='<tr><td><b>'+X(x.v)+'</b></td><td class="ctr">'+X(x.mix)+'</td><td class="num">'+x.n+'</td><td class="ctr">'+X(x.unit||'Cu.Mtr')+'</td><td class="num"><b>'+F(x.q)+'</b></td></tr>'; });
+  h+='<tr class="mp-total"><td colspan="2" style="text-align:right;padding-right:8px">TOTAL</td><td class="num">'+tn+'</td><td></td><td class="num">'+F(tq)+'</td></tr></table>';
+  return h;
+}
+/* the block the DPR document carries */
+window.cpDprSection=function(D){
+  try{
+    var lines=cpDayLines(D,'',''); var sup=cpSupplierSheet(D);
+    if(!lines.length&&!sup)return '';
+    return '<h3 class="sec">Daily Contractor / Supplier Performance</h3><div class="secbox">'+
+      (lines.length?cpDaySheet(D,lines,true):'<div class="empty">No contractor measurement today.</div>')+sup+'</div>';
+  }catch(e){ console.warn('cpDprSection',e); return ''; }
+};
+function cpKpi(lines){
+  var v={}, w={}, d={}, q=0, val=0;
+  lines.forEach(function(l){ v[l.vendor]=1; if(l.wo!=='—')w[l.wo]=1; d[l.d]=1; q+=l.qty; val+=l.qty*l.rate; });
+  var tile=function(n,l,c){ return '<div class="b" style="border-left-color:'+c+'"><div class="n">'+n+'</div><div class="l">'+l+'</div></div>'; };
+  return '<div class="cp-kpi">'+tile(Object.keys(v).length,'Contractors','#1d5a8f')+tile(Object.keys(w).length,'Work orders','#5b47a0')+tile(Object.keys(d).length,'Working days','#1c7a42')+tile(lines.length,'Measurement lines','#c98a1b')+tile('Rs '+F(Math.round(val)),'Amount (work order rates)','#b02a2a')+'</div>';
+}
+function cpBodyHTML(lines){ return cpKpi(lines)+(CP.view==='day'?cpDailyHTML(lines):cpGroupedHTML(lines)); }
+function cpTitle(){ return (CP.mode==='day')?('Daily Contractor / Supplier Performance — '+dM(cpDay())+(CP.vendor?(' · '+CP.vendor):'')+(CP.wo?(' · WO '+CP.wo):'')):('Contractor Progress — '+dM(CP.from)+' to '+dM(CP.to)+(CP.vendor?(' · '+CP.vendor):'')+(CP.wo?(' · WO '+CP.wo):'')); }
+
+function renderCtrProg(){
+  var host=E('cpBody'); if(!host)return;
+  cpCss(); cpDefaults();
+  if(CP.mode==='day'){ cpRenderDay(host); return; }
+  var lines=cpLines();
+  var vs=cpVendors(), ws=cpWos(CP.vendor);
+  var opt=function(list,cur,blank){ return '<option value="">'+X(blank)+'</option>'+list.map(function(v){ return '<option value="'+X(v)+'"'+(v===cur?' selected':'')+'>'+X(v)+'</option>'; }).join(''); };
+  host.innerHTML=
+    '<div class="no-print" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">'+
+      '<div class="field"><label>Report</label><select id="cpMode"><option value="day">One day (DPR style)</option><option value="range" selected>Period (from – to)</option></select></div>'+
+      '<div class="field"><label>From</label><input type="date" id="cpFrom" value="'+X(CP.from)+'" style="padding:6px 8px"></div>'+
+      '<div class="field"><label>To</label><input type="date" id="cpTo" value="'+X(CP.to)+'" style="padding:6px 8px"></div>'+
+      '<div class="field" style="min-width:220px"><label>Sub Contractor / Vendor</label><select id="cpV">'+opt(vs,CP.vendor,'All contractors')+'</select></div>'+
+      '<div class="field" style="min-width:150px"><label>Work Order #</label><select id="cpW">'+opt(ws,CP.wo,'All work orders')+'</select></div>'+
+      '<div class="field"><label>View</label><select id="cpView"><option value="ctr"'+(CP.view==='ctr'?' selected':'')+'>Contractor → Work Order → Item</option><option value="day"'+(CP.view==='day'?' selected':'')+'>Day by day</option></select></div>'+
+      '<button class="ghost" id="cpMonth" style="padding:7px 12px;font-size:.78rem">This month</button>'+
+      '<button class="ghost" id="cpWeek" style="padding:7px 12px;font-size:.78rem">Last 7 days</button>'+
+      '<button class="ghost" id="cpAll" style="padding:7px 12px;font-size:.78rem">Everything</button>'+
+    '</div>'+
+    '<div id="cpSheet"><div style="font-weight:800;color:var(--navy);font-size:1rem;margin:0 0 10px">'+X(cpTitle())+'</div>'+cpBodyHTML(lines)+'</div>';
+  var g=function(id){ return E(id); };
+  g('cpMode').onchange=function(){ CP.mode=this.value; renderCtrProg(); };
+  g('cpFrom').onchange=function(){ CP.from=this.value; renderCtrProg(); };
+  g('cpTo').onchange=function(){ CP.to=this.value; renderCtrProg(); };
+  g('cpV').onchange=function(){ CP.vendor=this.value; CP.wo=''; renderCtrProg(); };
+  g('cpW').onchange=function(){ CP.wo=this.value; renderCtrProg(); };
+  g('cpView').onchange=function(){ CP.view=this.value; renderCtrProg(); };
+  g('cpMonth').onclick=function(){ CP.to=ISO(new Date()); CP.from=CP.to.slice(0,8)+'01'; renderCtrProg(); };
+  g('cpWeek').onclick=function(){ var t=new Date(); CP.to=ISO(t); t.setDate(t.getDate()-6); CP.from=ISO(t); renderCtrProg(); };
+  g('cpAll').onclick=function(){ var ks=Object.keys(S.days||{}).filter(function(k){ return /^\d{4}-\d{2}-\d{2}$/.test(k)&&((S.days[k]||{}).progress||[]).length; }).sort(); CP.from=ks[0]||CP.from; CP.to=ISO(new Date()); renderCtrProg(); };
+  host.querySelectorAll('[data-cpv]').forEach(function(b){ b.onclick=function(){ var k=b.dataset.cpv; CP.open[k]=(CP.open[k]===false); renderCtrProg(); }; });
+  host.querySelectorAll('[data-cpd]').forEach(function(b){ b.onclick=function(){ var k='d|'+b.dataset.cpd; CP.open[k]=!CP.open[k]; renderCtrProg(); }; });
+  var pr=E('cpPrint'); if(pr)pr.onclick=cpPrint;
+  var xl=E('cpXlsx'); if(xl)xl.onclick=cpExcel;
+}
+function cpRenderDay(host){
+  var D=cpDay();
+  var vs=cpVendors(), ws=cpWos(CP.vendor);
+  var opt=function(list,cur,blank){ return '<option value="">'+X(blank)+'</option>'+list.map(function(v){ return '<option value="'+X(v)+'"'+(v===cur?' selected':'')+'>'+X(v)+'</option>'; }).join(''); };
+  var lines=cpDayLines(D,CP.vendor,CP.wo);
+  var proj=''; try{ proj=(PROJ&&PROJ.name)||''; }catch(e){}
+  var rn=''; try{ rn=reportNo(D); }catch(e){}
+  host.innerHTML=
+    '<div class="no-print" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">'+
+      '<div class="field"><label>Report</label><select id="cpMode"><option value="day" selected>One day (DPR style)</option><option value="range">Period (from – to)</option></select></div>'+
+      '<div class="field"><label>Day</label><div style="display:flex;gap:5px"><button class="ghost" id="cpPrev" style="padding:6px 10px">&#9664;</button><input type="date" id="cpD" value="'+X(D)+'" style="padding:6px 8px;font-weight:700"><button class="ghost" id="cpNext" style="padding:6px 10px">&#9654;</button><button class="ghost" id="cpToday" style="padding:6px 12px;font-size:.78rem">Today</button></div></div>'+
+      '<div class="field" style="min-width:220px"><label>Sub Contractor / Vendor</label><select id="cpV">'+opt(vs,CP.vendor,'All contractors')+'</select></div>'+
+      '<div class="field" style="min-width:150px"><label>Work Order #</label><select id="cpW">'+opt(ws,CP.wo,'All work orders')+'</select></div>'+
+    '</div>'+
+    '<div id="cpSheet" class="cp-dpr"><div style="text-align:center;margin:0 0 8px"><div style="font-weight:800;color:var(--navy);font-size:1.05rem;letter-spacing:.04em">DAILY CONTRACTOR / SUPPLIER PERFORMANCE</div>'+
+      '<div style="font-size:.8rem;color:var(--muted)">'+X(proj)+(rn?(' &nbsp;·&nbsp; DPR No. '+X(rn)):'')+' &nbsp;·&nbsp; '+X(dM(D))+(CP.vendor?(' &nbsp;·&nbsp; '+X(CP.vendor)):'')+(CP.wo?(' &nbsp;·&nbsp; WO '+X(CP.wo)):'')+'</div></div>'+
+      cpKpi(lines)+cpDaySheet(D,lines,false)+cpSupplierSheet(D)+'</div>';
+  var g=function(id){ return E(id); };
+  var shift=function(n){ var p=D.split('-'), dt=new Date(+p[0],+p[1]-1,+p[2]); dt.setDate(dt.getDate()+n); CP.d=ISO(dt); renderCtrProg(); };
+  g('cpMode').onchange=function(){ CP.mode=this.value; renderCtrProg(); };
+  g('cpPrev').onclick=function(){ shift(-1); }; g('cpNext').onclick=function(){ shift(1); };
+  g('cpToday').onclick=function(){ CP.d=ISO(new Date()); renderCtrProg(); };
+  g('cpD').onchange=function(){ CP.d=this.value||ISO(new Date()); renderCtrProg(); };
+  g('cpV').onchange=function(){ CP.vendor=this.value; CP.wo=''; renderCtrProg(); };
+  g('cpW').onchange=function(){ CP.wo=this.value; renderCtrProg(); };
+  var pr=E('cpPrint'); if(pr)pr.onclick=cpPrint;
+  var xl=E('cpXlsx'); if(xl)xl.onclick=cpExcel;
+}
+function cpPrint(){
+  var sheet=E('cpSheet'); if(!sheet)return;
+  var f=E('cpPrintFrame'); if(f)f.remove();
+  f=document.createElement('iframe'); f.id='cpPrintFrame'; f.style.cssText='position:fixed;left:-10000px;top:0;width:1100px;height:800px;border:0;opacity:0';
+  document.body.appendChild(f);
+  var doc=f.contentWindow.document; doc.open();
+  var proj=''; try{ proj=(PROJ&&PROJ.name)||''; }catch(e){}
+  doc.write('<!doctype html><html><head><meta charset="utf-8"><title>'+X(cpTitle())+'</title><style>@page{size:A4 landscape;margin:8mm}body{font-family:Segoe UI,Arial,sans-serif;color:#1f3247;margin:0;font-size:12px}'+
+    ':root{--navy:#12283f;--muted:#6d8199;--border:#d5dfea;--border2:#c4cdd6;--faint:#9aa8b8}'+CSS+'.no-print{display:none}.cp-v{break-inside:auto}.cp-vh{-webkit-print-color-adjust:exact;print-color-adjust:exact}'+
+    '.cp-t th,.cp-d th,.cp-t tr.tot td,.cp-t tr.day td,.cp-dpr table.grid th,.cp-dpr tr.mp-total td{-webkit-print-color-adjust:exact;print-color-adjust:exact}h1{font-size:16px;margin:0 0 2px}.sub{color:#6d8199;font-size:11px;margin:0 0 10px}</style></head><body>'+
+    '<h1>'+X(proj)+(CP.mode==='day'?' — Daily Contractor / Supplier Performance':' — Contractor Progress')+'</h1><div class="sub">'+X(cpTitle())+' · printed '+X(dM(ISO(new Date())))+'</div>'+
+    sheet.innerHTML.replace(/<div style="font-weight:800;color:var\(--navy\);font-size:1rem;margin:0 0 10px">[^<]*<\/div>/,'')+'</body></html>');
+  doc.close();
+  setTimeout(function(){ try{ f.contentWindow.focus(); f.contentWindow.print(); }catch(e){} },400);
+}
+function cpExcel(){
+  var lines=(CP.mode==='day')?cpDayLines(cpDay(),CP.vendor,CP.wo):cpLines(); if(!lines.length){ T('Nothing in this window.'); return; }
+  var G=cpGroup(lines), rows=[], daily=[];
+  G.vo.forEach(function(vk){ var v=G.V[vk]; v.wo.forEach(function(wk){ var w=v.W[wk]; w.io.forEach(function(k){ var it=w.I[k]; var cum=cpCum(it.boqId,CP.to);
+    rows.push([v.name,w.wo,w.title,it.item,it.sub,it.floor,it.unit,it.bq||'',it.qty,it.rate||'',(it.rsrc==='wo'?'Work order':(it.rsrc==='boq'?'BOQ':'')),Math.round(it.qty*it.rate),cum,it.bq?Math.round(cum/it.bq*1000)/10:'',Object.keys(it.days).length]); }); }); });
+  lines.slice().sort(function(a,b){ return a.d.localeCompare(b.d)||a.vendor.localeCompare(b.vendor)||a.wo.localeCompare(b.wo); }).forEach(function(l){
+    daily.push([l.d,l.vendor,l.wo,l.item,l.sub,l.floor,l.unit,l.no===''||l.no==null?'':N(l.no),l.len===''||l.len==null?'':N(l.len),l.br===''||l.br==null?'':N(l.br),l.ht===''||l.ht==null?'':N(l.ht),l.qty,l.rate||'',Math.round(l.qty*l.rate),cpCum(l.boqId,l.d),l.bq||'']); });
+  var proj=''; try{ proj=(PROJ&&PROJ.name)||''; }catch(e){}
+  try{
+    xlsxBuild([
+      xlsxSheet({name:'By Contractor',title:'Contractor Progress — '+proj,sub:cpTitle(),active:true,
+        head:['Sub Contractor / Vendor','Work Order #','Work order title','Item','Sub Segment','Floor','Unit','BOQ Qty','Done in period','Rate','Rate from','Amount','Cumulative to date','% of BOQ','Days worked'],
+        align:['b','c','l','l','l','l','c','n','n','m','c','m','n','p','i'],rows:rows,
+        totals:['TOTAL','','','','','','','',rows.reduce(function(a,r){ return a+N(r[8]); },0),'','',rows.reduce(function(a,r){ return a+N(r[11]); },0),'','','']}),
+      xlsxSheet({name:'Day by day',title:'Contractor Progress — day by day — '+proj,sub:cpTitle(),
+        head:['Date','Sub Contractor / Vendor','Work Order #','Item','Sub Segment','Floor','Unit','No','Length','Breadth','Height','Qty','Rate','Amount','Cumulative','BOQ Qty'],
+        align:['d','b','c','l','l','l','c','n','n','n','n','n','m','m','n','n'],rows:daily,
+        totals:['TOTAL','','','','','','','','','','',daily.reduce(function(a,r){ return a+N(r[11]); },0),'',daily.reduce(function(a,r){ return a+N(r[13]); },0),'','']})
+    ],(CP.mode==='day')?('Contractor-Performance-'+cpDay()+'.xlsx'):('Contractor-Progress-'+CP.from+'-to-'+CP.to+'.xlsx'));
+    T('⬇ Contractor progress exported — '+rows.length+' item line(s), '+daily.length+' daily line(s).');
+  }catch(e){ console.warn(e); T('The Excel writer is not available here.'); }
+}
+window.renderCtrProg=renderCtrProg;
+})();
+
+</script>
+<script id="gpayMod">
+/* ==================================================================
+   BALANCE PAYABLE AS PER GRN — a Procurement report
+   What the site owes its suppliers on the goods it has received: every
+   GRN line is a receipt, so its value is payable; what Finance has paid
+   the supplier comes off; the rest is the balance. GRNs not yet taken
+   into the store are listed as pending.
+   ================================================================== */
+(function(){
+'use strict';
+function E(id){ return document.getElementById(id); }
+function X(s){ try{ return esc(s); }catch(e){ return String(s==null?'':s); } }
+function N(v){ var n=parseFloat(String(v==null?'':v).replace(/[, ]/g,'')); return isFinite(n)?n:0; }
+function M(n){ try{ return woMoney(n); }catch(e){ return String(Math.round(n*100)/100); } }
+function Q(n){ try{ return fmt(n); }catch(e){ return String(n); } }
+function D(s){ try{ return pcFmtD(s); }catch(e){ return s||'—'; } }
+function K(s){ return String(s==null?'':s).toLowerCase().replace(/[^a-z0-9]+/g,' ').trim(); }
+function ISO(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function T(m){ try{ toast(m); }catch(e){} }
+
+var GP={from:'',to:'',vendor:'',proj:'',group:'',wh:'',st:'',open:{}};
+
+function gpInStore(){ var m={}; try{ var st=storeState(); (st.in||[]).forEach(function(x){ if(x&&x.grnKey)m[x.grnKey]=1; }); }catch(e){} return m; }
+function gpKey(r){ return 'grn:'+String(r.grn||'')+'|'+String(r.item||'').trim()+'|'+String(r.grnDate||''); }
+/* what Finance has paid each supplier, by normalised name */
+function gpPaid(){
+  var m={};
+  try{ var f=(typeof window.__finPayable==='function')?window.__finPayable():null;
+    if(f&&f.byVendor)f.byVendor.forEach(function(v){ m[K(v.name)]={paid:N(v.paid),rec:N(v.rec),name:v.name}; }); }catch(e){}
+  return m;
+}
+function gpLines(){
+  var P=(typeof procState==='function')?procState():(S.proc||{}), inS=gpInStore(), out=[];
+  (P.grn||[]).forEach(function(r){
+    if(!r)return;
+    var d=String(r.grnDate||''), v=String(r.vendor||'').trim()||'(no vendor)';
+    if(GP.from&&d&&d<GP.from)return; if(GP.to&&d&&d>GP.to)return;
+    if(GP.vendor&&v!==GP.vendor)return;
+    if(GP.proj&&String(r.proj||'').trim()!==GP.proj)return;
+    if(GP.group&&String(r.group||'').trim()!==GP.group)return;
+    if(GP.wh&&String(r.wh||'').trim()!==GP.wh)return;
+    var closed=!!inS[gpKey(r)];
+    if(GP.st==='pending'&&closed)return; if(GP.st==='closed'&&!closed)return;
+    var val=N(r.value)||N(r.qty)*N(r.rate);
+    out.push({grn:String(r.grn||''),date:d,vendor:v,proj:String(r.proj||''),item:String(r.item||''),group:String(r.group||''),unit:String(r.unit||''),
+      qty:N(r.qty),rate:N(r.rate),value:val,wh:String(r.wh||''),igp:String(r.igp||''),closed:closed,erp:String(r.status||'')});
+  });
+  return out;
+}
+function gpOpts(field){
+  var P=(typeof procState==='function')?procState():(S.proc||{}), s={};
+  (P.grn||[]).forEach(function(r){ var v=String((r&&r[field])||'').trim(); if(v)s[v]=1; });
+  return Object.keys(s).sort();
+}
+function gpDays(d){ if(!d)return ''; try{ var a=parseISO(d), b=new Date(); return Math.max(0,Math.round((b-a)/86400000)); }catch(e){ return ''; } }
+
+function gpBuild(){
+  var L=gpLines(), paid=gpPaid();
+  var V={}, vo=[];
+  L.forEach(function(l){
+    if(!V[l.vendor]){ V[l.vendor]={name:l.vendor,n:0,docs:{},val:0,pendN:0,pendVal:0,pendDocs:{},last:'',D:{},dorder:[]}; vo.push(l.vendor); }
+    var v=V[l.vendor]; v.n++; v.docs[l.grn]=1; v.val+=l.value; if(l.date>v.last)v.last=l.date;
+    if(!l.closed){ v.pendN++; v.pendVal+=l.value; v.pendDocs[l.grn]=1; }
+    var dk=l.grn+'|'+l.date; if(!v.D[dk]){ v.D[dk]={grn:l.grn,date:l.date,igp:l.igp,wh:l.wh,n:0,val:0,pend:0,items:[]}; v.dorder.push(dk); }
+    v.D[dk].n++; v.D[dk].val+=l.value; if(!l.closed)v.D[dk].pend++; v.D[dk].items.push(l);
+  });
+  vo.forEach(function(k){ var v=V[k]; var f=paid[K(v.name)]; v.paid=f?f.paid:0; v.finName=f?f.name:''; v.bal=v.val-v.paid; v.dorder.sort(function(a,b){ return V[k].D[b].date.localeCompare(V[k].D[a].date); }); });
+  vo.sort(function(a,b){ return V[b].bal-V[a].bal||a.localeCompare(b); });
+  var tot={n:L.length,val:0,paid:0,bal:0,pendN:0,pendVal:0,docs:0,pendDocs:0};
+  vo.forEach(function(k){ var v=V[k]; tot.val+=v.val; tot.paid+=v.paid; tot.bal+=v.bal; tot.pendN+=v.pendN; tot.pendVal+=v.pendVal; tot.docs+=Object.keys(v.docs).length; tot.pendDocs+=Object.keys(v.pendDocs).length; });
+  return {L:L,V:V,vo:vo,tot:tot,pending:L.filter(function(l){ return !l.closed; }).sort(function(a,b){ return a.date.localeCompare(b.date)||a.vendor.localeCompare(b.vendor); })};
+}
+var CSS='.gp-kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin:0 0 14px}'+
+ '.gp-kpi .b{background:#fff;border:1px solid var(--border);border-left:4px solid #1d5a8f;border-radius:10px;padding:9px 12px}.gp-kpi .n{font-size:1.15rem;font-weight:800;color:var(--navy)}.gp-kpi .l{font-size:.66rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700}.gp-kpi .s{font-size:.7rem;color:var(--muted)}'+
+ '.gp-h{font-weight:800;color:var(--navy);font-size:.95rem;margin:16px 0 6px;display:flex;gap:10px;align-items:center}.gp-h .m{font-weight:600;color:var(--muted);font-size:.76rem}'+
+ '.gp-t{width:100%;border-collapse:collapse;font-size:.8rem}.gp-t th{background:#eef2f6;color:var(--navy);font-size:.68rem;text-transform:uppercase;letter-spacing:.04em;padding:6px 8px;text-align:left;border:1px solid #d5dfea}.gp-t td{padding:5px 8px;border:1px solid #e3eaf2;vertical-align:top}.gp-t td.n,.gp-t th.n{text-align:right;white-space:nowrap}.gp-t tr.tot td{background:#f2f5f8;font-weight:800}.gp-t tr.doc td{background:#f7fafd;font-size:.76rem}.gp-t tr.v{cursor:pointer}.gp-t tr.v:hover td{background:#f4f8fc}'+
+ '.gp-pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:.66rem;font-weight:800;color:#fff}.gp-note{font-size:.74rem;color:var(--muted);margin:8px 0 0;line-height:1.5}';
+function gpCss(){ if(E('gpCss'))return; var s=document.createElement('style'); s.id='gpCss'; s.textContent=CSS; document.head.appendChild(s); }
+
+function gpTitle(){ var p=[]; if(GP.from||GP.to)p.push((GP.from?D(GP.from):'start')+' – '+(GP.to?D(GP.to):'today')); if(GP.vendor)p.push(GP.vendor); if(GP.proj)p.push(GP.proj); if(GP.group)p.push(GP.group); if(GP.wh)p.push(GP.wh); if(GP.st)p.push(GP.st==='pending'?'pending GRNs only':'closed GRNs only'); return p.length?p.join(' · '):'all GRNs on record'; }
+function gpKpi(B){ var t=B.tot; var tile=function(n,l,c,s){ return '<div class="b" style="border-left-color:'+c+'"><div class="n">'+n+'</div><div class="l">'+l+'</div>'+(s?('<div class="s">'+s+'</div>'):'')+'</div>'; };
+  return '<div class="gp-kpi">'+tile('Rs '+M(t.val),'Received as per GRN','#1d5a8f',t.docs+' GRN'+(t.docs===1?'':'s')+' · '+t.n+' line'+(t.n===1?'':'s'))+tile('Rs '+M(t.paid),'Paid (Finance)','#1c7a42','supplier payments posted in Finance')+
+    tile('Rs '+M(t.bal),'Balance payable','#b02a2a',B.vo.length+' supplier'+(B.vo.length===1?'':'s'))+tile('Rs '+M(t.pendVal),'Pending GRNs','#c98a1b',t.pendDocs+' GRN'+(t.pendDocs===1?'':'s')+' · '+t.pendN+' line'+(t.pendN===1?'':'s')+' not yet in store')+'</div>'; }
+function gpVendorTable(B){
+  var h='<table class="gp-t"><thead><tr><th style="width:26%">Supplier / Vendor</th><th class="n">GRNs</th><th class="n">Lines</th><th class="n">Received (GRN value)</th><th class="n">Paid (Finance)</th><th class="n">Balance payable</th><th class="n">Pending GRNs</th><th class="n">Pending value</th><th>Last GRN</th></tr></thead><tbody>';
+  if(!B.vo.length)return h+'<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:14px">No GRN in this window.</td></tr></tbody></table>';
+  B.vo.forEach(function(k){ var v=B.V[k], open=!!GP.open[k];
+    h+='<tr class="v" data-gpv="'+X(k)+'" title="Click — GRN by GRN"><td><span style="display:inline-block;width:14px;color:#6d8199">'+(open?'▾':'▸')+'</span><b>'+X(v.name)+'</b>'+(v.finName&&K(v.finName)!==K(v.name)?('<div style="font-size:.68rem;color:var(--muted)">Finance: '+X(v.finName)+'</div>'):'')+(!v.finName?'<div style="font-size:.66rem;color:#b8860b">no payment line in Finance under this name</div>':'')+'</td>'+
+      '<td class="n">'+Object.keys(v.docs).length+'</td><td class="n">'+v.n+'</td><td class="n">'+M(v.val)+'</td><td class="n" style="color:#1c7a42">'+M(v.paid)+'</td><td class="n" style="font-weight:800'+(v.bal<-0.005?';color:#1c7a42':'')+'">'+M(v.bal)+'</td>'+
+      '<td class="n">'+(v.pendN?('<span class="gp-pill" style="background:#c98a1b">'+Object.keys(v.pendDocs).length+'</span>'):'—')+'</td><td class="n" style="color:#b8860b">'+(v.pendVal?M(v.pendVal):'—')+'</td><td>'+D(v.last)+'</td></tr>';
+    if(open){
+      h+='<tr class="doc"><td colspan="9" style="padding:0"><table class="gp-t" style="margin:0"><thead><tr><th>GRN #</th><th>Date</th><th>IGP #</th><th>Warehouse</th><th>Items</th><th class="n">Lines</th><th class="n">Value</th><th>Status</th></tr></thead><tbody>'+
+        v.dorder.map(function(dk){ var d=v.D[dk]; var st=d.pend===0?'Closed':(d.pend===d.n?'Pending':'Partly in store');
+          return '<tr><td><b>'+X(d.grn)+'</b></td><td>'+D(d.date)+'</td><td>'+X(d.igp||'—')+'</td><td>'+X(d.wh||'')+'</td><td style="font-size:.74rem">'+X(d.items.map(function(i){ return i.item+' ('+Q(i.qty)+' '+i.unit+')'; }).join(' · ').slice(0,180))+'</td><td class="n">'+d.n+'</td><td class="n">'+M(d.val)+'</td><td><span class="gp-pill" style="background:'+(st==='Closed'?'#1f8f4e':(st==='Pending'?'#c98a1b':'#0e7bb8'))+'">'+st+'</span></td></tr>'; }).join('')+
+        '</tbody></table></td></tr>';
+    }
+  });
+  var t=B.tot;
+  h+='<tr class="tot"><td>TOTAL — '+B.vo.length+' supplier'+(B.vo.length===1?'':'s')+'</td><td class="n">'+t.docs+'</td><td class="n">'+t.n+'</td><td class="n">'+M(t.val)+'</td><td class="n">'+M(t.paid)+'</td><td class="n">'+M(t.bal)+'</td><td class="n">'+t.pendDocs+'</td><td class="n">'+M(t.pendVal)+'</td><td></td></tr>';
+  return h+'</tbody></table>';
+}
+function gpPendingTable(B){
+  var P=B.pending;
+  var h='<table class="gp-t"><thead><tr><th>GRN #</th><th>Date</th><th>Supplier / Vendor</th><th style="width:26%">Item</th><th>Group</th><th>Unit</th><th class="n">Qty</th><th class="n">Rate</th><th class="n">Value</th><th>Warehouse</th><th class="n">Days</th></tr></thead><tbody>';
+  if(!P.length)return h+'<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:14px">Nothing pending — every GRN in this window is in the store.</td></tr></tbody></table>';
+  var tv=0, tq=0;
+  P.forEach(function(l){ tv+=l.value; tq+=l.qty;
+    h+='<tr><td><b>'+X(l.grn)+'</b></td><td>'+D(l.date)+'</td><td>'+X(l.vendor)+'</td><td>'+X(l.item)+'</td><td style="font-size:.74rem">'+X(l.group)+'</td><td>'+X(l.unit)+'</td><td class="n">'+Q(l.qty)+'</td><td class="n">'+M(l.rate)+'</td><td class="n"><b>'+M(l.value)+'</b></td><td style="font-size:.74rem">'+X(l.wh)+'</td><td class="n">'+gpDays(l.date)+'</td></tr>'; });
+  h+='<tr class="tot"><td colspan="8">TOTAL — '+P.length+' pending line'+(P.length===1?'':'s')+' on '+B.tot.pendDocs+' GRN'+(B.tot.pendDocs===1?'':'s')+'</td><td class="n">'+M(tv)+'</td><td colspan="2"></td></tr>';
+  return h+'</tbody></table>';
+}
+window.procGrnPayHTML=function(){
+  gpCss();
+  var B=gpBuild();
+  var opt=function(list,cur,blank){ return '<option value="">'+X(blank)+'</option>'+list.map(function(v){ return '<option value="'+X(v)+'"'+(v===cur?' selected':'')+'>'+X(v)+'</option>'; }).join(''); };
+  return '<div class="no-print" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">'+
+      '<div class="field"><label>GRN date from</label><input type="date" id="gpFrom" value="'+X(GP.from)+'" style="padding:6px 8px"></div>'+
+      '<div class="field"><label>To</label><input type="date" id="gpTo" value="'+X(GP.to)+'" style="padding:6px 8px"></div>'+
+      '<div class="field" style="min-width:210px"><label>Supplier / Vendor</label><select id="gpV">'+opt(gpOpts('vendor'),GP.vendor,'All suppliers')+'</select></div>'+
+      '<div class="field" style="min-width:160px"><label>Project / Sub Segment</label><select id="gpP">'+opt(gpOpts('proj'),GP.proj,'All')+'</select></div>'+
+      '<div class="field" style="min-width:140px"><label>Group</label><select id="gpG">'+opt(gpOpts('group'),GP.group,'All groups')+'</select></div>'+
+      '<div class="field" style="min-width:140px"><label>Warehouse</label><select id="gpW">'+opt(gpOpts('wh'),GP.wh,'All')+'</select></div>'+
+      '<div class="field"><label>GRN status</label><select id="gpS"><option value="">All</option><option value="pending"'+(GP.st==='pending'?' selected':'')+'>Pending (not in store)</option><option value="closed"'+(GP.st==='closed'?' selected':'')+'>Closed (in store)</option></select></div>'+
+      '<button class="ghost" id="gpClear" style="padding:7px 12px;font-size:.78rem">Clear</button>'+
+      '<button class="ghost" id="gpXlsx" style="padding:7px 12px;font-size:.78rem;border-color:#1f8f4e;color:#1f8f4e">⬇ Excel</button>'+
+      '<button class="primary" id="gpPrint" style="padding:7px 14px;font-size:.78rem">🖨 Print</button>'+
+    '</div>'+
+    '<div id="gpSheet">'+
+      '<div style="text-align:center;margin:0 0 10px"><div style="font-weight:800;color:var(--navy);font-size:1.05rem;letter-spacing:.04em">BALANCE PAYABLE AS PER GRN</div><div style="font-size:.78rem;color:var(--muted)">'+X((typeof PROJ!=='undefined'&&PROJ)?PROJ.name:'')+' · '+X(gpTitle())+' · as at '+X(D(ISO(new Date())))+'</div></div>'+
+      gpKpi(B)+
+      '<div class="gp-h">🏢 Supplier wise <span class="m">received as per GRN − paid in Finance = balance payable · click a supplier for its GRNs</span></div>'+gpVendorTable(B)+
+      '<div class="gp-h">⏳ Pending GRNs <span class="m">received on paper, not yet taken into the store (Store ▸ Material In ▸ From GRN)</span></div>'+gpPendingTable(B)+
+      '<div class="gp-note"><b>How it is worked out.</b> Every GRN line is goods received, so its value (qty × rate) is payable to that supplier. Payments come from Finance — the "Paid" lines posted against the same supplier name; a supplier with no Finance line shows the whole GRN value as payable. Pending = the GRN is in Procurement but not yet in the store\'s Material In.</div>'+
+    '</div>';
+};
+window.procGrnPayWire=function(){
+  var g=function(id){ return E(id); }; if(!g('gpSheet'))return;
+  var re=function(){ try{ renderProc(); }catch(e){} };
+  g('gpFrom').onchange=function(){ GP.from=this.value; re(); }; g('gpTo').onchange=function(){ GP.to=this.value; re(); };
+  g('gpV').onchange=function(){ GP.vendor=this.value; re(); }; g('gpP').onchange=function(){ GP.proj=this.value; re(); };
+  g('gpG').onchange=function(){ GP.group=this.value; re(); }; g('gpW').onchange=function(){ GP.wh=this.value; re(); }; g('gpS').onchange=function(){ GP.st=this.value; re(); };
+  g('gpClear').onclick=function(){ GP={from:'',to:'',vendor:'',proj:'',group:'',wh:'',st:'',open:{}}; re(); };
+  document.querySelectorAll('#gpSheet tr[data-gpv]').forEach(function(tr){ tr.onclick=function(){ var k=tr.dataset.gpv; GP.open[k]=!GP.open[k]; re(); }; });
+  g('gpPrint').onclick=function(){
+    try{ printBillDoc(pbHeadHTML('BALANCE PAYABLE AS PER GRN')+'<div style="font-size:.74rem;color:#33465a;margin-bottom:8px;font-weight:600">'+X(gpTitle())+'</div><style>'+CSS+'</style>'+g('gpSheet').innerHTML,{orient:'landscape',scale:70}); }
+    catch(e){ console.warn(e); window.print(); }
+  };
+  g('gpXlsx').onclick=function(){
+    var B=gpBuild(); var proj=''; try{ proj=(PROJ&&PROJ.name)||''; }catch(e){}
+    var vrows=B.vo.map(function(k){ var v=B.V[k]; return [v.name,Object.keys(v.docs).length,v.n,v.val,v.paid,v.bal,Object.keys(v.pendDocs).length,v.pendVal,v.last]; });
+    var prows=B.pending.map(function(l){ return [l.grn,l.date,l.vendor,l.item,l.group,l.unit,l.qty,l.rate,l.value,l.wh,gpDays(l.date)]; });
+    var arows=B.L.map(function(l){ return [l.grn,l.date,l.vendor,l.proj,l.item,l.group,l.unit,l.qty,l.rate,l.value,l.wh,l.closed?'Closed':'Pending',l.erp]; });
+    try{
+      xlsxBuild([
+        xlsxSheet({name:'Supplier wise',title:'Balance Payable as per GRN — '+proj,sub:gpTitle(),active:true,
+          head:['Supplier / Vendor','GRNs','Lines','Received (GRN value)','Paid (Finance)','Balance payable','Pending GRNs','Pending value','Last GRN'],align:['b','i','i','m','m','m','i','m','d'],rows:vrows,
+          totals:['TOTAL',B.tot.docs,B.tot.n,B.tot.val,B.tot.paid,B.tot.bal,B.tot.pendDocs,B.tot.pendVal,'']}),
+        xlsxSheet({name:'Pending GRNs',title:'Pending GRNs — not yet in store — '+proj,sub:gpTitle(),
+          head:['GRN #','GRN Date','Supplier / Vendor','Item','Group','Unit','Qty','Rate','Value','Warehouse','Days pending'],align:['b','d','l','l','l','c','n','m','m','l','i'],rows:prows,
+          totals:['TOTAL','','','','','','','',B.tot.pendVal,'','']}),
+        xlsxSheet({name:'All GRN lines',title:'GRN lines — '+proj,sub:gpTitle(),
+          head:['GRN #','GRN Date','Supplier / Vendor','Project','Item','Group','Unit','Qty','Rate','Value','Warehouse','Status','ERP status'],align:['b','d','l','l','l','l','c','n','m','m','l','c','l'],rows:arows,
+          totals:['TOTAL','','','','','','','','',B.tot.val,'','','']})
+      ],'Balance-Payable-GRN-'+ISO(new Date())+'.xlsx');
+      T('⬇ Balance payable exported — '+vrows.length+' supplier(s), '+prows.length+' pending line(s).');
+    }catch(e){ console.warn(e); T('The Excel writer is not available here.'); }
+  };
+};
+window.__gpCount=function(){ try{ var inS=gpInStore(); var P=procState(); return (P.grn||[]).filter(function(r){ return r&&!inS[gpKey(r)]; }).length; }catch(e){ return ''; } };
 })();
 
 </script>
