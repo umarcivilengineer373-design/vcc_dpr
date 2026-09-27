@@ -34260,7 +34260,7 @@ function procGrnHTML(){
   try{ var _st=storeState(); (_st.in||[]).forEach(function(x){ if(x&&x.grnKey)inStore[x.grnKey]=1; }); }catch(e){}
   var grnKeyOf=function(r){ return 'grn:'+String(r.grn||'')+'|'+String(r.item||'').trim()+'|'+String(r.grnDate||''); };
   var rows=pcApply((P.grn||[]).map(function(r){ var erp=String(r.status||'').trim();
-      return Object.assign({},r,{poAmt:0,grnVal:r.value||0,erpStatus:erp,status:(inStore[grnKeyOf(r)]?'Closed':'Pending')}); }),['item','grn','igp','vendor','group']);
+      return Object.assign({},r,{poAmt:0,grnVal:r.value||0,erpStatus:erp,inStore:!!inStore[grnKeyOf(r)],status:(/^\s*(clos|paid)/i.test(erp)?'Closed':'Pending')}); }),['item','grn','igp','vendor','group']);
   var nClosed=rows.filter(function(r){ return r.status==='Closed'; }).length, nPend=rows.length-nClosed;
   var q=0,v=0;
   var body=rows.map(function(r,i){ q+=(+r.qty||0); v+=(+r.value||0);
@@ -34271,10 +34271,10 @@ function procGrnHTML(){
       '<td style="font-size:.78rem">'+esc(r.item)+'</td><td style="font-size:.72rem">'+esc(r.group||'')+'</td>'+
       '<td style="text-align:center;font-size:.74rem">'+esc(r.unit||'')+'</td><td class="num">'+fmt(r.qty)+'</td>'+
       '<td class="num">'+woMoney(r.rate)+'</td><td class="num" style="font-weight:700">'+woMoney(r.value)+'</td>'+
-      '<td style="font-size:.74rem">'+esc(r.wh||'')+'</td><td style="white-space:nowrap"><span style="display:inline-block;padding:2px 9px;border-radius:999px;font-size:.68rem;font-weight:800;color:#fff;background:'+(r.status==='Closed'?'#1f8f4e':'#c98a1b')+'" title="'+(r.status==='Closed'?'received into the store (Material In)':'not yet taken into the store — Store ▸ Material In ▸ From GRN')+'">'+r.status+'</span>'+
-        (r.erpStatus?('<div style="font-size:.64rem;color:var(--muted)">ERP: '+esc(r.erpStatus)+'</div>'):'')+'</td></tr>';
+      '<td style="font-size:.74rem">'+esc(r.wh||'')+'</td><td style="white-space:nowrap"><span style="display:inline-block;padding:2px 9px;border-radius:999px;font-size:.68rem;font-weight:800;color:#fff;background:'+(r.status==='Closed'?'#1f8f4e':'#c0392b')+'" title="'+(r.status==='Closed'?'GRN closed — paid':'GRN open — balance payable')+'">'+(r.status==='Closed'?'Closed · Paid':'Pending · Payable')+'</span>'+
+        '<div style="font-size:.64rem;color:'+(r.inStore?'var(--muted)':'#b8860b')+'">'+(r.inStore?'in store':'not in store yet')+(r.erpStatus&&r.status!=='Closed'?(' · '+esc(r.erpStatus)):'')+'</div></td></tr>';
   }).join('');
-  if(body)body+='<tr style="background:#f2f5f8;font-weight:700"><td colspan="9" style="text-align:right">TOTAL</td><td class="num">'+fmt(q)+'</td><td></td><td class="num">'+woMoney(v)+'</td><td></td><td style="font-size:.72rem;white-space:nowrap"><span style="color:#1f8f4e">'+nClosed+' closed</span> · <span style="color:#c98a1b">'+nPend+' pending</span></td></tr>';
+  if(body)body+='<tr style="background:#f2f5f8;font-weight:700"><td colspan="9" style="text-align:right">TOTAL</td><td class="num">'+fmt(q)+'</td><td></td><td class="num">'+woMoney(v)+'</td><td></td><td style="font-size:.72rem;white-space:nowrap"><span style="color:#1f8f4e">'+nClosed+' paid</span> · <span style="color:#c0392b">'+nPend+' payable</span></td></tr>';
   return pcTable(['#','Project','GRN #','GRN Date','IGP #','Vendor','Item','Group','Unit','Qty','Rate','Value','Warehouse','Status'],body,
     ['center','left','left','left','left','left','left','left','center','right','right','right','left','left']);
 }
@@ -58921,9 +58921,9 @@ window.renderCtrProg=renderCtrProg;
 /* ==================================================================
    BALANCE PAYABLE AS PER GRN — a Procurement report
    What the site owes its suppliers on the goods it has received: every
-   GRN line is a receipt, so its value is payable; what Finance has paid
-   the supplier comes off; the rest is the balance. GRNs not yet taken
-   into the store are listed as pending.
+   GRN line is a receipt, so its value is payable. A GRN whose status
+   (from the ERP export) reads Closed has been paid; every other GRN is
+   still payable and is listed as pending.
    ================================================================== */
 (function(){
 'use strict';
@@ -58958,11 +58958,13 @@ function gpLines(){
     if(GP.proj&&String(r.proj||'').trim()!==GP.proj)return;
     if(GP.group&&String(r.group||'').trim()!==GP.group)return;
     if(GP.wh&&String(r.wh||'').trim()!==GP.wh)return;
-    var closed=!!inS[gpKey(r)];
+    var erp=String(r.status||'').trim();
+    var closed=/^\s*clos/i.test(erp)||/^\s*paid/i.test(erp);          /* Closed on the GRN = paid */
+    var inStore=!!inS[gpKey(r)];
     if(GP.st==='pending'&&closed)return; if(GP.st==='closed'&&!closed)return;
     var val=N(r.value)||N(r.qty)*N(r.rate);
     out.push({grn:String(r.grn||''),date:d,vendor:v,proj:String(r.proj||''),item:String(r.item||''),group:String(r.group||''),unit:String(r.unit||''),
-      qty:N(r.qty),rate:N(r.rate),value:val,wh:String(r.wh||''),igp:String(r.igp||''),closed:closed,erp:String(r.status||'')});
+      qty:N(r.qty),rate:N(r.rate),value:val,wh:String(r.wh||''),igp:String(r.igp||''),closed:closed,inStore:inStore,erp:erp});
   });
   return out;
 }
@@ -58977,16 +58979,17 @@ function gpBuild(){
   var L=gpLines(), paid=gpPaid();
   var V={}, vo=[];
   L.forEach(function(l){
-    if(!V[l.vendor]){ V[l.vendor]={name:l.vendor,n:0,docs:{},val:0,pendN:0,pendVal:0,pendDocs:{},last:'',D:{},dorder:[]}; vo.push(l.vendor); }
+    if(!V[l.vendor]){ V[l.vendor]={name:l.vendor,n:0,docs:{},val:0,paid:0,paidDocs:{},pendN:0,pendVal:0,pendDocs:{},notIn:0,last:'',D:{},dorder:[]}; vo.push(l.vendor); }
     var v=V[l.vendor]; v.n++; v.docs[l.grn]=1; v.val+=l.value; if(l.date>v.last)v.last=l.date;
-    if(!l.closed){ v.pendN++; v.pendVal+=l.value; v.pendDocs[l.grn]=1; }
-    var dk=l.grn+'|'+l.date; if(!v.D[dk]){ v.D[dk]={grn:l.grn,date:l.date,igp:l.igp,wh:l.wh,n:0,val:0,pend:0,items:[]}; v.dorder.push(dk); }
-    v.D[dk].n++; v.D[dk].val+=l.value; if(!l.closed)v.D[dk].pend++; v.D[dk].items.push(l);
+    if(l.closed){ v.paid+=l.value; v.paidDocs[l.grn]=1; } else { v.pendN++; v.pendVal+=l.value; v.pendDocs[l.grn]=1; }
+    if(!l.inStore)v.notIn++;
+    var dk=l.grn+'|'+l.date; if(!v.D[dk]){ v.D[dk]={grn:l.grn,date:l.date,igp:l.igp,wh:l.wh,n:0,val:0,pend:0,notIn:0,erp:l.erp,items:[]}; v.dorder.push(dk); }
+    v.D[dk].n++; v.D[dk].val+=l.value; if(!l.closed)v.D[dk].pend++; if(!l.inStore)v.D[dk].notIn++; v.D[dk].items.push(l);
   });
-  vo.forEach(function(k){ var v=V[k]; var f=paid[K(v.name)]; v.paid=f?f.paid:0; v.finName=f?f.name:''; v.bal=v.val-v.paid; v.dorder.sort(function(a,b){ return V[k].D[b].date.localeCompare(V[k].D[a].date); }); });
+  vo.forEach(function(k){ var v=V[k]; v.bal=v.val-v.paid; v.finName=''; v.dorder.sort(function(a,b){ return V[k].D[b].date.localeCompare(V[k].D[a].date); }); });
   vo.sort(function(a,b){ return V[b].bal-V[a].bal||a.localeCompare(b); });
-  var tot={n:L.length,val:0,paid:0,bal:0,pendN:0,pendVal:0,docs:0,pendDocs:0};
-  vo.forEach(function(k){ var v=V[k]; tot.val+=v.val; tot.paid+=v.paid; tot.bal+=v.bal; tot.pendN+=v.pendN; tot.pendVal+=v.pendVal; tot.docs+=Object.keys(v.docs).length; tot.pendDocs+=Object.keys(v.pendDocs).length; });
+  var tot={n:L.length,val:0,paid:0,bal:0,pendN:0,pendVal:0,docs:0,pendDocs:0,paidDocs:0,notIn:0};
+  vo.forEach(function(k){ var v=V[k]; tot.val+=v.val; tot.paid+=v.paid; tot.bal+=v.bal; tot.pendN+=v.pendN; tot.pendVal+=v.pendVal; tot.docs+=Object.keys(v.docs).length; tot.pendDocs+=Object.keys(v.pendDocs).length; tot.paidDocs+=Object.keys(v.paidDocs).length; tot.notIn+=v.notIn; });
   return {L:L,V:V,vo:vo,tot:tot,pending:L.filter(function(l){ return !l.closed; }).sort(function(a,b){ return a.date.localeCompare(b.date)||a.vendor.localeCompare(b.vendor); })};
 }
 var CSS='.gp-kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin:0 0 14px}'+
@@ -58996,36 +58999,36 @@ var CSS='.gp-kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px
  '.gp-pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:.66rem;font-weight:800;color:#fff}.gp-note{font-size:.74rem;color:var(--muted);margin:8px 0 0;line-height:1.5}';
 function gpCss(){ if(E('gpCss'))return; var s=document.createElement('style'); s.id='gpCss'; s.textContent=CSS; document.head.appendChild(s); }
 
-function gpTitle(){ var p=[]; if(GP.from||GP.to)p.push((GP.from?D(GP.from):'start')+' – '+(GP.to?D(GP.to):'today')); if(GP.vendor)p.push(GP.vendor); if(GP.proj)p.push(GP.proj); if(GP.group)p.push(GP.group); if(GP.wh)p.push(GP.wh); if(GP.st)p.push(GP.st==='pending'?'pending GRNs only':'closed GRNs only'); return p.length?p.join(' · '):'all GRNs on record'; }
+function gpTitle(){ var p=[]; if(GP.from||GP.to)p.push((GP.from?D(GP.from):'start')+' – '+(GP.to?D(GP.to):'today')); if(GP.vendor)p.push(GP.vendor); if(GP.proj)p.push(GP.proj); if(GP.group)p.push(GP.group); if(GP.wh)p.push(GP.wh); if(GP.st)p.push(GP.st==='pending'?'open (payable) GRNs only':'closed (paid) GRNs only'); return p.length?p.join(' · '):'all GRNs on record'; }
 function gpKpi(B){ var t=B.tot; var tile=function(n,l,c,s){ return '<div class="b" style="border-left-color:'+c+'"><div class="n">'+n+'</div><div class="l">'+l+'</div>'+(s?('<div class="s">'+s+'</div>'):'')+'</div>'; };
-  return '<div class="gp-kpi">'+tile('Rs '+M(t.val),'Received as per GRN','#1d5a8f',t.docs+' GRN'+(t.docs===1?'':'s')+' · '+t.n+' line'+(t.n===1?'':'s'))+tile('Rs '+M(t.paid),'Paid (Finance)','#1c7a42','supplier payments posted in Finance')+
-    tile('Rs '+M(t.bal),'Balance payable','#b02a2a',B.vo.length+' supplier'+(B.vo.length===1?'':'s'))+tile('Rs '+M(t.pendVal),'Pending GRNs','#c98a1b',t.pendDocs+' GRN'+(t.pendDocs===1?'':'s')+' · '+t.pendN+' line'+(t.pendN===1?'':'s')+' not yet in store')+'</div>'; }
+  return '<div class="gp-kpi">'+tile('Rs '+M(t.val),'Received as per GRN','#1d5a8f',t.docs+' GRN'+(t.docs===1?'':'s')+' · '+t.n+' line'+(t.n===1?'':'s'))+tile('Rs '+M(t.paid),'Paid — GRN closed','#1c7a42',t.paidDocs+' GRN'+(t.paidDocs===1?'':'s')+' marked Closed')+
+    tile('Rs '+M(t.bal),'Balance payable — GRN open','#b02a2a',t.pendDocs+' GRN'+(t.pendDocs===1?'':'s')+' · '+t.pendN+' line'+(t.pendN===1?'':'s')+' · '+B.vo.filter(function(k){ return B.V[k].bal>0.005; }).length+' supplier(s)')+tile(String(t.notIn),'Lines not yet in store','#c98a1b','received on paper, Material In pending')+'</div>'; }
 function gpVendorTable(B){
-  var h='<table class="gp-t"><thead><tr><th style="width:26%">Supplier / Vendor</th><th class="n">GRNs</th><th class="n">Lines</th><th class="n">Received (GRN value)</th><th class="n">Paid (Finance)</th><th class="n">Balance payable</th><th class="n">Pending GRNs</th><th class="n">Pending value</th><th>Last GRN</th></tr></thead><tbody>';
+  var h='<table class="gp-t"><thead><tr><th style="width:26%">Supplier / Vendor</th><th class="n">GRNs</th><th class="n">Lines</th><th class="n">Received (GRN value)</th><th class="n">Paid (closed GRNs)</th><th class="n">Balance payable</th><th class="n">Open GRNs</th><th class="n">Not in store</th><th>Last GRN</th></tr></thead><tbody>';
   if(!B.vo.length)return h+'<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:14px">No GRN in this window.</td></tr></tbody></table>';
   B.vo.forEach(function(k){ var v=B.V[k], open=!!GP.open[k];
-    h+='<tr class="v" data-gpv="'+X(k)+'" title="Click — GRN by GRN"><td><span style="display:inline-block;width:14px;color:#6d8199">'+(open?'▾':'▸')+'</span><b>'+X(v.name)+'</b>'+(v.finName&&K(v.finName)!==K(v.name)?('<div style="font-size:.68rem;color:var(--muted)">Finance: '+X(v.finName)+'</div>'):'')+(!v.finName?'<div style="font-size:.66rem;color:#b8860b">no payment line in Finance under this name</div>':'')+'</td>'+
-      '<td class="n">'+Object.keys(v.docs).length+'</td><td class="n">'+v.n+'</td><td class="n">'+M(v.val)+'</td><td class="n" style="color:#1c7a42">'+M(v.paid)+'</td><td class="n" style="font-weight:800'+(v.bal<-0.005?';color:#1c7a42':'')+'">'+M(v.bal)+'</td>'+
-      '<td class="n">'+(v.pendN?('<span class="gp-pill" style="background:#c98a1b">'+Object.keys(v.pendDocs).length+'</span>'):'—')+'</td><td class="n" style="color:#b8860b">'+(v.pendVal?M(v.pendVal):'—')+'</td><td>'+D(v.last)+'</td></tr>';
+    h+='<tr class="v" data-gpv="'+X(k)+'" title="Click — GRN by GRN"><td><span style="display:inline-block;width:14px;color:#6d8199">'+(open?'▾':'▸')+'</span><b>'+X(v.name)+'</b></td>'+
+      '<td class="n">'+Object.keys(v.docs).length+'</td><td class="n">'+v.n+'</td><td class="n">'+M(v.val)+'</td><td class="n" style="color:#1c7a42">'+M(v.paid)+'</td><td class="n" style="font-weight:800;color:'+(v.bal>0.005?'#b02a2a':'#1c7a42')+'">'+M(v.bal)+'</td>'+
+      '<td class="n">'+(v.pendN?('<span class="gp-pill" style="background:#b02a2a">'+Object.keys(v.pendDocs).length+'</span>'):'<span class="gp-pill" style="background:#1f8f4e">all paid</span>')+'</td><td class="n">'+(v.notIn?('<span class="gp-pill" style="background:#c98a1b">'+v.notIn+'</span>'):'—')+'</td><td>'+D(v.last)+'</td></tr>';
     if(open){
       h+='<tr class="doc"><td colspan="9" style="padding:0"><table class="gp-t" style="margin:0"><thead><tr><th>GRN #</th><th>Date</th><th>IGP #</th><th>Warehouse</th><th>Items</th><th class="n">Lines</th><th class="n">Value</th><th>Status</th></tr></thead><tbody>'+
-        v.dorder.map(function(dk){ var d=v.D[dk]; var st=d.pend===0?'Closed':(d.pend===d.n?'Pending':'Partly in store');
-          return '<tr><td><b>'+X(d.grn)+'</b></td><td>'+D(d.date)+'</td><td>'+X(d.igp||'—')+'</td><td>'+X(d.wh||'')+'</td><td style="font-size:.74rem">'+X(d.items.map(function(i){ return i.item+' ('+Q(i.qty)+' '+i.unit+')'; }).join(' · ').slice(0,180))+'</td><td class="n">'+d.n+'</td><td class="n">'+M(d.val)+'</td><td><span class="gp-pill" style="background:'+(st==='Closed'?'#1f8f4e':(st==='Pending'?'#c98a1b':'#0e7bb8'))+'">'+st+'</span></td></tr>'; }).join('')+
+        v.dorder.map(function(dk){ var d=v.D[dk]; var st=d.pend===0?'Closed · paid':(d.pend===d.n?'Open · payable':'Partly paid');
+          return '<tr><td><b>'+X(d.grn)+'</b></td><td>'+D(d.date)+'</td><td>'+X(d.igp||'—')+'</td><td>'+X(d.wh||'')+'</td><td style="font-size:.74rem">'+X(d.items.map(function(i){ return i.item+' ('+Q(i.qty)+' '+i.unit+')'; }).join(' · ').slice(0,180))+'</td><td class="n">'+d.n+'</td><td class="n">'+M(d.val)+'</td><td><span class="gp-pill" style="background:'+(d.pend===0?'#1f8f4e':(d.pend===d.n?'#b02a2a':'#0e7bb8'))+'">'+st+'</span>'+(d.notIn?'<div style="font-size:.64rem;color:#b8860b">not in store</div>':'')+'</td></tr>'; }).join('')+
         '</tbody></table></td></tr>';
     }
   });
   var t=B.tot;
-  h+='<tr class="tot"><td>TOTAL — '+B.vo.length+' supplier'+(B.vo.length===1?'':'s')+'</td><td class="n">'+t.docs+'</td><td class="n">'+t.n+'</td><td class="n">'+M(t.val)+'</td><td class="n">'+M(t.paid)+'</td><td class="n">'+M(t.bal)+'</td><td class="n">'+t.pendDocs+'</td><td class="n">'+M(t.pendVal)+'</td><td></td></tr>';
+  h+='<tr class="tot"><td>TOTAL — '+B.vo.length+' supplier'+(B.vo.length===1?'':'s')+'</td><td class="n">'+t.docs+'</td><td class="n">'+t.n+'</td><td class="n">'+M(t.val)+'</td><td class="n">'+M(t.paid)+'</td><td class="n">'+M(t.bal)+'</td><td class="n">'+t.pendDocs+'</td><td class="n">'+t.notIn+'</td><td></td></tr>';
   return h+'</tbody></table>';
 }
 function gpPendingTable(B){
   var P=B.pending;
-  var h='<table class="gp-t"><thead><tr><th>GRN #</th><th>Date</th><th>Supplier / Vendor</th><th style="width:26%">Item</th><th>Group</th><th>Unit</th><th class="n">Qty</th><th class="n">Rate</th><th class="n">Value</th><th>Warehouse</th><th class="n">Days</th></tr></thead><tbody>';
-  if(!P.length)return h+'<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:14px">Nothing pending — every GRN in this window is in the store.</td></tr></tbody></table>';
+  var h='<table class="gp-t"><thead><tr><th>GRN #</th><th>Date</th><th>Supplier / Vendor</th><th style="width:24%">Item</th><th>Group</th><th>Unit</th><th class="n">Qty</th><th class="n">Rate</th><th class="n">Value</th><th>Warehouse</th><th>GRN status</th><th class="n">Days</th></tr></thead><tbody>';
+  if(!P.length)return h+'<tr><td colspan="12" style="text-align:center;color:var(--muted);padding:14px">Nothing payable — every GRN in this window is closed (paid).</td></tr></tbody></table>';
   var tv=0, tq=0;
   P.forEach(function(l){ tv+=l.value; tq+=l.qty;
-    h+='<tr><td><b>'+X(l.grn)+'</b></td><td>'+D(l.date)+'</td><td>'+X(l.vendor)+'</td><td>'+X(l.item)+'</td><td style="font-size:.74rem">'+X(l.group)+'</td><td>'+X(l.unit)+'</td><td class="n">'+Q(l.qty)+'</td><td class="n">'+M(l.rate)+'</td><td class="n"><b>'+M(l.value)+'</b></td><td style="font-size:.74rem">'+X(l.wh)+'</td><td class="n">'+gpDays(l.date)+'</td></tr>'; });
-  h+='<tr class="tot"><td colspan="8">TOTAL — '+P.length+' pending line'+(P.length===1?'':'s')+' on '+B.tot.pendDocs+' GRN'+(B.tot.pendDocs===1?'':'s')+'</td><td class="n">'+M(tv)+'</td><td colspan="2"></td></tr>';
+    h+='<tr><td><b>'+X(l.grn)+'</b></td><td>'+D(l.date)+'</td><td>'+X(l.vendor)+'</td><td>'+X(l.item)+'</td><td style="font-size:.74rem">'+X(l.group)+'</td><td>'+X(l.unit)+'</td><td class="n">'+Q(l.qty)+'</td><td class="n">'+M(l.rate)+'</td><td class="n"><b>'+M(l.value)+'</b></td><td style="font-size:.74rem">'+X(l.wh)+'</td><td style="font-size:.72rem">'+X(l.erp||'Open')+(l.inStore?'':'<div style="font-size:.64rem;color:#b8860b">not in store</div>')+'</td><td class="n">'+gpDays(l.date)+'</td></tr>'; });
+  h+='<tr class="tot"><td colspan="8">TOTAL — '+P.length+' payable line'+(P.length===1?'':'s')+' on '+B.tot.pendDocs+' open GRN'+(B.tot.pendDocs===1?'':'s')+'</td><td class="n">'+M(tv)+'</td><td colspan="3"></td></tr>';
   return h+'</tbody></table>';
 }
 window.procGrnPayHTML=function(){
@@ -59039,7 +59042,7 @@ window.procGrnPayHTML=function(){
       '<div class="field" style="min-width:160px"><label>Project / Sub Segment</label><select id="gpP">'+opt(gpOpts('proj'),GP.proj,'All')+'</select></div>'+
       '<div class="field" style="min-width:140px"><label>Group</label><select id="gpG">'+opt(gpOpts('group'),GP.group,'All groups')+'</select></div>'+
       '<div class="field" style="min-width:140px"><label>Warehouse</label><select id="gpW">'+opt(gpOpts('wh'),GP.wh,'All')+'</select></div>'+
-      '<div class="field"><label>GRN status</label><select id="gpS"><option value="">All</option><option value="pending"'+(GP.st==='pending'?' selected':'')+'>Pending (not in store)</option><option value="closed"'+(GP.st==='closed'?' selected':'')+'>Closed (in store)</option></select></div>'+
+      '<div class="field"><label>GRN status</label><select id="gpS"><option value="">All</option><option value="pending"'+(GP.st==='pending'?' selected':'')+'>Open — payable</option><option value="closed"'+(GP.st==='closed'?' selected':'')+'>Closed — paid</option></select></div>'+
       '<button class="ghost" id="gpClear" style="padding:7px 12px;font-size:.78rem">Clear</button>'+
       '<button class="ghost" id="gpXlsx" style="padding:7px 12px;font-size:.78rem;border-color:#1f8f4e;color:#1f8f4e">⬇ Excel</button>'+
       '<button class="primary" id="gpPrint" style="padding:7px 14px;font-size:.78rem">🖨 Print</button>'+
@@ -59047,9 +59050,9 @@ window.procGrnPayHTML=function(){
     '<div id="gpSheet">'+
       '<div style="text-align:center;margin:0 0 10px"><div style="font-weight:800;color:var(--navy);font-size:1.05rem;letter-spacing:.04em">BALANCE PAYABLE AS PER GRN</div><div style="font-size:.78rem;color:var(--muted)">'+X((typeof PROJ!=='undefined'&&PROJ)?PROJ.name:'')+' · '+X(gpTitle())+' · as at '+X(D(ISO(new Date())))+'</div></div>'+
       gpKpi(B)+
-      '<div class="gp-h">🏢 Supplier wise <span class="m">received as per GRN − paid in Finance = balance payable · click a supplier for its GRNs</span></div>'+gpVendorTable(B)+
-      '<div class="gp-h">⏳ Pending GRNs <span class="m">received on paper, not yet taken into the store (Store ▸ Material In ▸ From GRN)</span></div>'+gpPendingTable(B)+
-      '<div class="gp-note"><b>How it is worked out.</b> Every GRN line is goods received, so its value (qty × rate) is payable to that supplier. Payments come from Finance — the "Paid" lines posted against the same supplier name; a supplier with no Finance line shows the whole GRN value as payable. Pending = the GRN is in Procurement but not yet in the store\'s Material In.</div>'+
+      '<div class="gp-h">🏢 Supplier wise <span class="m">received as per GRN − closed (paid) GRNs = balance payable · click a supplier for its GRNs</span></div>'+gpVendorTable(B)+
+      '<div class="gp-h">⏳ Pending — open GRNs still payable <span class="m">every GRN whose status is not Closed</span></div>'+gpPendingTable(B)+
+      '<div class="gp-note"><b>How it is worked out.</b> Every GRN line is goods received, so its value (qty × rate) is payable to that supplier. A GRN whose Status reads <b>Closed</b> in the GRN sheet has been paid; every other GRN (Open / blank) is still payable. "Not in store" means the receipt has not yet been taken into Store ▸ Material In.</div>'+
     '</div>';
 };
 window.procGrnPayWire=function(){
@@ -59066,26 +59069,26 @@ window.procGrnPayWire=function(){
   };
   g('gpXlsx').onclick=function(){
     var B=gpBuild(); var proj=''; try{ proj=(PROJ&&PROJ.name)||''; }catch(e){}
-    var vrows=B.vo.map(function(k){ var v=B.V[k]; return [v.name,Object.keys(v.docs).length,v.n,v.val,v.paid,v.bal,Object.keys(v.pendDocs).length,v.pendVal,v.last]; });
-    var prows=B.pending.map(function(l){ return [l.grn,l.date,l.vendor,l.item,l.group,l.unit,l.qty,l.rate,l.value,l.wh,gpDays(l.date)]; });
-    var arows=B.L.map(function(l){ return [l.grn,l.date,l.vendor,l.proj,l.item,l.group,l.unit,l.qty,l.rate,l.value,l.wh,l.closed?'Closed':'Pending',l.erp]; });
+    var vrows=B.vo.map(function(k){ var v=B.V[k]; return [v.name,Object.keys(v.docs).length,v.n,v.val,v.paid,v.bal,Object.keys(v.pendDocs).length,v.notIn,v.last]; });
+    var prows=B.pending.map(function(l){ return [l.grn,l.date,l.vendor,l.item,l.group,l.unit,l.qty,l.rate,l.value,l.wh,l.erp||'Open',l.inStore?'In store':'Not in store',gpDays(l.date)]; });
+    var arows=B.L.map(function(l){ return [l.grn,l.date,l.vendor,l.proj,l.item,l.group,l.unit,l.qty,l.rate,l.value,l.wh,l.closed?'Closed — paid':'Open — payable',l.inStore?'In store':'Not in store',l.erp]; });
     try{
       xlsxBuild([
         xlsxSheet({name:'Supplier wise',title:'Balance Payable as per GRN — '+proj,sub:gpTitle(),active:true,
-          head:['Supplier / Vendor','GRNs','Lines','Received (GRN value)','Paid (Finance)','Balance payable','Pending GRNs','Pending value','Last GRN'],align:['b','i','i','m','m','m','i','m','d'],rows:vrows,
-          totals:['TOTAL',B.tot.docs,B.tot.n,B.tot.val,B.tot.paid,B.tot.bal,B.tot.pendDocs,B.tot.pendVal,'']}),
-        xlsxSheet({name:'Pending GRNs',title:'Pending GRNs — not yet in store — '+proj,sub:gpTitle(),
-          head:['GRN #','GRN Date','Supplier / Vendor','Item','Group','Unit','Qty','Rate','Value','Warehouse','Days pending'],align:['b','d','l','l','l','c','n','m','m','l','i'],rows:prows,
-          totals:['TOTAL','','','','','','','',B.tot.pendVal,'','']}),
+          head:['Supplier / Vendor','GRNs','Lines','Received (GRN value)','Paid (closed GRNs)','Balance payable','Open GRNs','Lines not in store','Last GRN'],align:['b','i','i','m','m','m','i','i','d'],rows:vrows,
+          totals:['TOTAL',B.tot.docs,B.tot.n,B.tot.val,B.tot.paid,B.tot.bal,B.tot.pendDocs,B.tot.notIn,'']}),
+        xlsxSheet({name:'Payable (open GRNs)',title:'Open GRNs — balance payable — '+proj,sub:gpTitle(),
+          head:['GRN #','GRN Date','Supplier / Vendor','Item','Group','Unit','Qty','Rate','Value','Warehouse','GRN status','Store','Days'],align:['b','d','l','l','l','c','n','m','m','l','c','c','i'],rows:prows,
+          totals:['TOTAL','','','','','','','',B.tot.pendVal,'','','','']}),
         xlsxSheet({name:'All GRN lines',title:'GRN lines — '+proj,sub:gpTitle(),
-          head:['GRN #','GRN Date','Supplier / Vendor','Project','Item','Group','Unit','Qty','Rate','Value','Warehouse','Status','ERP status'],align:['b','d','l','l','l','l','c','n','m','m','l','c','l'],rows:arows,
-          totals:['TOTAL','','','','','','','','',B.tot.val,'','','']})
+          head:['GRN #','GRN Date','Supplier / Vendor','Project','Item','Group','Unit','Qty','Rate','Value','Warehouse','Payment','Store','GRN status'],align:['b','d','l','l','l','l','c','n','m','m','l','c','c','l'],rows:arows,
+          totals:['TOTAL','','','','','','','','',B.tot.val,'','','','']})
       ],'Balance-Payable-GRN-'+ISO(new Date())+'.xlsx');
       T('⬇ Balance payable exported — '+vrows.length+' supplier(s), '+prows.length+' pending line(s).');
     }catch(e){ console.warn(e); T('The Excel writer is not available here.'); }
   };
 };
-window.__gpCount=function(){ try{ var inS=gpInStore(); var P=procState(); return (P.grn||[]).filter(function(r){ return r&&!inS[gpKey(r)]; }).length; }catch(e){ return ''; } };
+window.__gpCount=function(){ try{ var P=procState(); return (P.grn||[]).filter(function(r){ return r&&!/^\s*(clos|paid)/i.test(String(r.status||'')); }).length; }catch(e){ return ''; } };
 })();
 
 </script>
