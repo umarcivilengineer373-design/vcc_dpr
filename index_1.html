@@ -55636,13 +55636,15 @@ function ceoProc(D){
   var prdr=P.prdr||[], po=P.po||[];
 
   var det={};
-  var prTodayN={}, prTodayI=0, prAllN={}, prAllI=0, prTodayL=[], prAllM={}, prAllO=[];
+  var prTodayN={}, prTodayI=0, prAllN={}, prAllI=0, prTodayL=[], prAllM={}, prAllO=[], prByY={}, poByY={};
+  var fyOf=function(d){ try{ if(typeof pcFY==='function')return String(pcFY(d)||''); }catch(e){} return ''; };
   prdr.forEach(function(r){
     var d=dnorm(r.prDate||r.drDate||r.reqDate); if(!d||d>D)return;
     var k=String(r.pr||r.dr||'').trim()||('#'+d);
-    prAllN[k]=1; prAllI++;
-    var kk=k+'|'+String(r.year||'');
-    if(!prAllM[kk]){ prAllM[kk]={pr:k,year:String(r.year||''),date:d,items:0,qty:0,ord:0,by:String(r.by||'')}; prAllO.push(prAllM[kk]); }
+    var yr=String(r.year||'').trim()||fyOf(d);
+    prAllN[k+'|'+yr]=1; prAllI++; prByY[yr]=prByY[yr]||{}; prByY[yr][k]=1;
+    var kk=k+'|'+yr;
+    if(!prAllM[kk]){ prAllM[kk]={pr:k,year:yr,date:d,items:0,qty:0,ord:0,by:String(r.by||'')}; prAllO.push(prAllM[kk]); }
     prAllM[kk].items++; prAllM[kk].qty+=N(r.qty); prAllM[kk].ord+=N(r.ordQty||r.poQty);
     if(d===D){ prTodayN[k]=1; prTodayI++; prTodayL.push({pr:k,item:String(r.item||''),group:String(r.group||''),unit:String(r.unit||''),qty:N(r.qty),ord:N(r.ordQty||r.poQty),by:String(r.by||'')}); }
   });
@@ -55654,12 +55656,13 @@ function ceoProc(D){
   po.forEach(function(r){
     var d=dnorm(r.poDate); if(!d||d>D)return;
     var ka=String(r.po||'').trim()||('#'+d);
-    poAllN[ka]=1; poAllI++;
+    var pyr=String(r.year||'').trim()||fyOf(d);
+    poAllN[ka+'|'+pyr]=1; poAllI++; poByY[pyr]=poByY[pyr]||{}; poByY[pyr][ka]=1;
     var aa=0; try{ aa=(typeof pcLineAmt==='function')?pcLineAmt(r):(N(r.total)||N(r.value)||N(r.qty)*N(r.rate)); }
     catch(e){ aa=N(r.total)||N(r.value); }
     poAllAmt+=aa;
-    var kk=ka+'|'+String(r.year||'');
-    if(!poAllM[kk]){ poAllM[kk]={po:ka,year:String(r.year||''),date:d,vendor:String(r.vendor||''),pr:String(r.pr||''),items:0,amt:0}; poAllO.push(poAllM[kk]); }
+    var kk=ka+'|'+pyr;
+    if(!poAllM[kk]){ poAllM[kk]={po:ka,year:pyr,date:d,vendor:String(r.vendor||''),pr:String(r.pr||''),items:0,amt:0}; poAllO.push(poAllM[kk]); }
     poAllM[kk].items++; poAllM[kk].amt+=aa;
     if(d!==D)return;
     var k=ka;
@@ -55680,7 +55683,7 @@ function ceoProc(D){
     (F.prs||[]).forEach(function(r){
       var d=dnorm(r.prDate); if(d&&d>D)return;
       if(r.status!=='Open PR'&&r.status!=='Partially Ordered')return;
-      pendPrN[String(r.pr||'').trim()||r.key]=1;
+      pendPrN[(String(r.pr||'').trim()||r.key)+'|'+String(r.year||'')]=1;
       var nl=Array.isArray(r.lines)?r.lines.length:(N(r.lines)||1);
       pendPrI+=nl;
       pendPrL.push({pr:String(r.pr||''),year:String(r.year||''),date:dnorm(r.prDate),status:String(r.status||''),lines:nl,qty:N(r.qty),ord:N(r.ordQty),by:String(r.by||'')});
@@ -55714,10 +55717,17 @@ function ceoProc(D){
     poTodayNos:Object.keys(poTodayN).length, poTodayItems:poTodayI, poTodayAmt:poTodayAmt,
     poAllNos:Object.keys(poAllN).length,     poAllItems:poAllI, poAllAmt:poAllAmt, grnVal:grnVal,
     poPendNos:Object.keys(pendPoN).length,   poPendItems:pendPoI,   poPendAmt:pendPoAmt,
+    prYears:yrSplit(prByY), poYears:yrSplit(poByY),
     det:det
   };
 }
 
+/* "2026-27 50 · 2025-26 11" — one figure per financial year, newest first */
+function yrSplit(m){
+  var ys=Object.keys(m).filter(function(y){ return y; }); if(ys.length<2)return '';
+  ys.sort(function(a,b){ return b.localeCompare(a); });
+  return ys.map(function(y){ return y+' <b>'+Object.keys(m[y]).length+'</b>'; }).join(' \u00B7 ');
+}
 /* ---------------- 1b. SUPPLIER PAYABLE — as per the GRN register ----------------
    A GRN whose ERP status reads Closed / Paid is paid; every other GRN is payable. */
 function ceoSup(D){
@@ -56002,6 +56012,7 @@ var CEO_CSS=[
 'table.ce td.h.b2{background:#1d4670}table.ce td.h.b3{background:#24557f}table.ce td.h.b4{background:#2c6fa8}',
 'table.ce td.l{color:#41586f;font-weight:600}',
 'table.ce td.v{text-align:right;font-weight:800;color:#12283f;font-variant-numeric:tabular-nums;white-space:nowrap;width:38%}',
+'table.ce td.v small.yrs{display:block;font-size:.62rem;font-weight:600;color:#6d8199;letter-spacing:.02em}table.ce td.v small.yrs b{color:#12283f}',
 'table.ce td.v.g{color:#1f8f4e}table.ce td.v.o{color:#c4651e}table.ce td.v.r{color:#b02a2a}',
 'table.ce tr.alt td{background:#fafcfe}',
 'table.ce tr.tot td{background:#eef4fa;font-weight:800}',
@@ -56185,12 +56196,12 @@ function ceoSheetHTML(d){
       '<div class="ce-col"><table class="ce"><tbody>'+
         '<tr><td class="h" colspan="2">Procurement Section</td></tr>'+
         row('PR generated today (Nos / Items)',NUM(p.prTodayNos)+' / '+NUM(p.prTodayItems),0,'','pr.today')+
-        row('Total PR generated (Nos / Items)',NUM(p.prAllNos)+' / '+NUM(p.prAllItems),1,'','pr.all')+
+        row('Total PR generated (Nos / Items)',NUM(p.prAllNos)+' / '+NUM(p.prAllItems)+(p.prYears?'<small class="yrs">'+p.prYears+'</small>':''),1,'','pr.all')+
         row('Total pending PR (Nos / Items)',NUM(p.prPendNos)+' / '+NUM(p.prPendItems),0,'o','pr.pend')+
         row('PO generated today (Nos / Items)',NUM(p.poTodayNos)+' / '+NUM(p.poTodayItems),1,'','po.today')+
         row('Today PO generated (Amount)',RS(p.poTodayAmt),0,'','po.today')+
         row('Total pending POs (Nos / Items)',NUM(p.poPendNos)+' / '+NUM(p.poPendItems),1,'o','po.pend')+
-        row('Total PO value raised (up to date)',RS(p.poAllAmt),0,'','po.all')+
+        row('Total PO value raised (up to date)',RS(p.poAllAmt)+(p.poYears?'<small class="yrs">'+NUM(p.poAllNos)+' PO \u2014 '+p.poYears+'</small>':''),0,'','po.all')+
         row('Material received \u2014 GRN value',RS(p.grnVal),1,'g','grn.all')+
         '<tr class="tot ce-cl" data-ced="po.pend"><td class="l">Total pending POs amount</td><td class="v r">'+RS(p.poPendAmt)+'</td></tr>'+
         '<tr><td colspan="2" style="padding:6px 10px 8px">'+
@@ -59684,16 +59695,18 @@ window.pcPrWhy=function(docs){
     (docs||[]).forEach(function(o){
       var pn=String(o.proj||'').trim()||'(blank)', y=String(o.year||'').trim()||'(no year)';
       byP[pn]=(byP[pn]||0)+1; byY[y]=(byY[y]||0)+1;
-      var k=String(o.pr||'').trim().toLowerCase(); (byNo[k]=byNo[k]||[]).push(pn+' / '+y);
+      /* the same number in two financial years is two real PRs — only the same number
+         and year under two different Sub Segment spellings is a double count */
+      var k=String(o.pr||'').trim().toLowerCase()+' / '+y; byNo[k]=byNo[k]||{}; byNo[k][pn]=1;
     });
     var li=function(m){ return Object.keys(m).sort(function(a,b){ return m[b]-m[a]; }).map(function(k){ return X(k)+' <b>'+m[k]+'</b>'; }).join(' \u00B7 '); };
-    var twice=Object.keys(byNo).filter(function(k){ return byNo[k].length>1; });
+    var twice=Object.keys(byNo).filter(function(k){ return Object.keys(byNo[k]).length>1; });
     var h='<div style="margin-top:6px;padding:8px 10px;background:#f6f9fc;border:1px solid #dbe5ee;border-radius:8px;font-size:.74rem;color:#33475b">'+
       '<b>'+(docs||[]).length+' PRs</b> are counted like this \u2014 by Sub Segment (column C): '+(li(byP)||'\u2014')+
       '<br>by year: '+(li(byY)||'\u2014');
     if(twice.length){
-      h+='<br><span style="color:#b02a2a"><b>'+twice.length+' PR number(s) counted more than once</b> (same number under two names or years): '+
-         twice.slice(0,40).map(function(k){ return X(k)+' ['+X(byNo[k].join(' | '))+']'; }).join('; ')+(twice.length>40?' \u2026':'')+'</span>';
+      h+='<br><span style="color:#b02a2a"><b>'+twice.length+' PR number(s) counted more than once</b> (same number and year under two Sub Segment spellings): '+
+         twice.slice(0,40).map(function(k){ return X(k)+' ['+X(Object.keys(byNo[k]).join(' | '))+']'; }).join('; ')+(twice.length>40?' \u2026':'')+'</span>';
     }
     var pn=projName(); var other=Object.keys(byP).filter(function(k){ try{ return pcKey(k)!==pcKey(pn); }catch(e){ return k!==pn; } });
     if(pn&&other.length)h+='<br><span style="color:#8a6d1a">Names other than \u201C'+X(pn)+'\u201D can be taken out in Settings \u25B8 Procurement &amp; Store imports \u25B8 Rows by Sub Segment.</span>';
