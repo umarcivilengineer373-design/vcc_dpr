@@ -55635,15 +55635,22 @@ function ceoProc(D){
   try{ P=(typeof procState==='function')?procState():((typeof S!=='undefined'&&S.proc)||{}); }catch(e){ P={}; }
   var prdr=P.prdr||[], po=P.po||[];
 
-  var prTodayN={}, prTodayI=0, prAllN={}, prAllI=0;
+  var det={};
+  var prTodayN={}, prTodayI=0, prAllN={}, prAllI=0, prTodayL=[], prAllM={}, prAllO=[];
   prdr.forEach(function(r){
     var d=dnorm(r.prDate||r.drDate||r.reqDate); if(!d||d>D)return;
     var k=String(r.pr||r.dr||'').trim()||('#'+d);
     prAllN[k]=1; prAllI++;
-    if(d===D){ prTodayN[k]=1; prTodayI++; }
+    var kk=k+'|'+String(r.year||'');
+    if(!prAllM[kk]){ prAllM[kk]={pr:k,year:String(r.year||''),date:d,items:0,qty:0,ord:0,by:String(r.by||'')}; prAllO.push(prAllM[kk]); }
+    prAllM[kk].items++; prAllM[kk].qty+=N(r.qty); prAllM[kk].ord+=N(r.ordQty||r.poQty);
+    if(d===D){ prTodayN[k]=1; prTodayI++; prTodayL.push({pr:k,item:String(r.item||''),group:String(r.group||''),unit:String(r.unit||''),qty:N(r.qty),ord:N(r.ordQty||r.poQty),by:String(r.by||'')}); }
   });
+  det['pr.today']={t:'PR lines generated on '+dLong(D),cols:[['PR #','pr'],['Item','item'],['Group','group'],['Unit','unit'],['Req Qty','qty',1],['Ordered','ord',1],['By','by']],rows:prTodayL,tot:{qty:1,ord:1}};
+  prAllO.sort(function(a,b){ return b.date<a.date?-1:b.date>a.date?1:0; });
+  det['pr.all']={t:'Every PR up to '+dLong(D)+' \u2014 one row per PR',cols:[['PR #','pr'],['Year','year'],['Date','date','d'],['Items','items',1],['Req Qty','qty',1],['Ordered','ord',1],['Raised by','by']],rows:prAllO,tot:{items:1,qty:1,ord:1}};
 
-  var poTodayN={}, poTodayI=0, poTodayAmt=0, poAllN={}, poAllI=0, poAllAmt=0;
+  var poTodayN={}, poTodayI=0, poTodayAmt=0, poAllN={}, poAllI=0, poAllAmt=0, poTodayL=[], poAllM={}, poAllO=[];
   po.forEach(function(r){
     var d=dnorm(r.poDate); if(!d||d>D)return;
     var ka=String(r.po||'').trim()||('#'+d);
@@ -55651,40 +55658,54 @@ function ceoProc(D){
     var aa=0; try{ aa=(typeof pcLineAmt==='function')?pcLineAmt(r):(N(r.total)||N(r.value)||N(r.qty)*N(r.rate)); }
     catch(e){ aa=N(r.total)||N(r.value); }
     poAllAmt+=aa;
+    var kk=ka+'|'+String(r.year||'');
+    if(!poAllM[kk]){ poAllM[kk]={po:ka,year:String(r.year||''),date:d,vendor:String(r.vendor||''),pr:String(r.pr||''),items:0,amt:0}; poAllO.push(poAllM[kk]); }
+    poAllM[kk].items++; poAllM[kk].amt+=aa;
     if(d!==D)return;
     var k=ka;
     poTodayN[k]=1; poTodayI++;
     var amt=0; try{ amt=(typeof pcLineAmt==='function')?pcLineAmt(r):(N(r.total)||N(r.value)||N(r.qty)*N(r.rate)); }
     catch(e){ amt=N(r.total)||N(r.value); }
     poTodayAmt+=amt;
+    poTodayL.push({po:k,vendor:String(r.vendor||''),pr:String(r.pr||''),item:String(r.item||''),qty:N(r.qty),rate:N(r.rate),amt:amt});
   });
+  det['po.today']={t:'PO lines raised on '+dLong(D),cols:[['PO #','po'],['Vendor','vendor'],['PR #','pr'],['Item','item'],['Qty','qty',1],['Rate','rate','m'],['Amount','amt','m']],rows:poTodayL,tot:{qty:1,amt:'m'}};
+  poAllO.sort(function(a,b){ return b.date<a.date?-1:b.date>a.date?1:0; });
+  det['po.all']={t:'Every PO up to '+dLong(D)+' \u2014 one row per PO',cols:[['PO #','po'],['Year','year'],['Date','date','d'],['Vendor','vendor'],['PR #','pr'],['Items','items',1],['Amount','amt','m']],rows:poAllO,tot:{items:1,amt:'m'}};
 
   /* PRs still waiting for a PO, in whole or in part */
-  var pendPrN={}, pendPrI=0;
+  var pendPrN={}, pendPrI=0, pendPrL=[];
   try{
     var F=(typeof procFlow==='function')?procFlow():{prs:[]};
     (F.prs||[]).forEach(function(r){
       var d=dnorm(r.prDate); if(d&&d>D)return;
       if(r.status!=='Open PR'&&r.status!=='Partially Ordered')return;
       pendPrN[String(r.pr||'').trim()||r.key]=1;
-      pendPrI+=(r.lines||1);
+      var nl=Array.isArray(r.lines)?r.lines.length:(N(r.lines)||1);
+      pendPrI+=nl;
+      pendPrL.push({pr:String(r.pr||''),year:String(r.year||''),date:dnorm(r.prDate),status:String(r.status||''),lines:nl,qty:N(r.qty),ord:N(r.ordQty),by:String(r.by||'')});
     });
   }catch(e){}
+  det['pr.pend']={t:'PRs still waiting for a PO (in whole or in part)',cols:[['PR #','pr'],['Year','year'],['Date','date','d'],['Status','status'],['Lines','lines',1],['Req Qty','qty',1],['Ordered','ord',1],['Raised by','by']],rows:pendPrL,tot:{lines:1,qty:1,ord:1}};
 
   /* POs raised but the material has not fully come in */
-  var pendPoN={}, pendPoI=0, pendPoAmt=0, grnVal=0;
+  var pendPoN={}, pendPoI=0, pendPoAmt=0, grnVal=0, pendPoL=[], grnL=[];
   try{
     var M=(typeof procMaster==='function')?procMaster():[];
     M.forEach(function(r){
-      var gd=dnorm(r.grnDate); if(!gd||gd<=D)grnVal+=N(r.grnVal);
+      var gd=dnorm(r.grnDate); if(!gd||gd<=D){ grnVal+=N(r.grnVal); if(N(r.grnVal)||r.grn)grnL.push({grn:String(r.grn||''),date:gd,vendor:String(r.vendor||''),po:String(r.po||''),item:String(r.item||''),qty:N(r.recQty),val:N(r.grnVal)}); }
       var pq=N(r.poQty); if(pq<=0)return;
       var d=dnorm(r.poDate); if(d&&d>D)return;
       if(N(r.recQty)>=pq-0.001)return;             /* fully received */
       String(r.po||'').split(',').forEach(function(x){ x=x.trim(); if(x)pendPoN[x]=1; });
       pendPoI++;
       pendPoAmt+=N(r.poAmt);
+      pendPoL.push({po:String(r.po||''),date:d,vendor:String(r.vendor||''),item:String(r.item||''),poQty:pq,rec:N(r.recQty),bal:Math.max(0,pq-N(r.recQty)),amt:N(r.poAmt)});
     });
   }catch(e){}
+  det['po.pend']={t:'PO lines whose material has not fully come in',cols:[['PO #','po'],['PO date','date','d'],['Vendor','vendor'],['Item','item'],['PO Qty','poQty',1],['Received','rec',1],['Balance','bal',1],['PO Amount','amt','m']],rows:pendPoL,tot:{poQty:1,rec:1,bal:1,amt:'m'}};
+  grnL.sort(function(a,b){ return b.date<a.date?-1:b.date>a.date?1:0; });
+  det['grn.all']={t:'Material received against GRNs up to '+dLong(D),cols:[['GRN #','grn'],['Date','date','d'],['Vendor','vendor'],['PO #','po'],['Item','item'],['Qty','qty',1],['Value','val','m']],rows:grnL,tot:{qty:1,val:'m'}};
 
   return {
     prTodayNos:Object.keys(prTodayN).length, prTodayItems:prTodayI,
@@ -55692,8 +55713,33 @@ function ceoProc(D){
     prPendNos:Object.keys(pendPrN).length,   prPendItems:pendPrI,
     poTodayNos:Object.keys(poTodayN).length, poTodayItems:poTodayI, poTodayAmt:poTodayAmt,
     poAllNos:Object.keys(poAllN).length,     poAllItems:poAllI, poAllAmt:poAllAmt, grnVal:grnVal,
-    poPendNos:Object.keys(pendPoN).length,   poPendItems:pendPoI,   poPendAmt:pendPoAmt
+    poPendNos:Object.keys(pendPoN).length,   poPendItems:pendPoI,   poPendAmt:pendPoAmt,
+    det:det
   };
+}
+
+/* ---------------- 1b. SUPPLIER PAYABLE — as per the GRN register ----------------
+   A GRN whose ERP status reads Closed / Paid is paid; every other GRN is payable. */
+function ceoSup(D){
+  var P={}; try{ P=(typeof procState==='function')?procState():((typeof S!=='undefined'&&S.proc)||{}); }catch(e){}
+  var tot=0, paid=0, bal=0, lines=0, pendL=[], paidL=[], byV={}, grnAll={}, grnPend={};
+  ((P&&P.grn)||[]).forEach(function(g){
+    var d=dnorm(g.grnDate||g.date); if(d&&d>D)return;
+    var v=N(g.value)||N(g.qty)*N(g.rate); if(!v&&!g.grn)return;
+    var closed=/^\s*(clos|paid)/i.test(String(g.status||''));
+    var vn=String(g.vendor||'').trim()||'(no vendor)', gn=String(g.grn||'').trim();
+    tot+=v; lines++; if(gn)grnAll[gn]=1;
+    var row={grn:gn,date:d,vendor:vn,po:String(g.po||''),item:String(g.item||''),qty:N(g.qty),val:v,status:String(g.status||'')};
+    if(closed){ paid+=v; paidL.push(row); }
+    else{ bal+=v; pendL.push(row); if(gn)grnPend[gn]=1; if(!byV[vn])byV[vn]={vendor:vn,grns:{},lines:0,val:0}; byV[vn].val+=v; byV[vn].lines++; if(gn)byV[vn].grns[gn]=1; }
+  });
+  var vend=Object.keys(byV).map(function(k){ var x=byV[k]; return {vendor:x.vendor,grns:Object.keys(x.grns).length,lines:x.lines,val:x.val}; }).sort(function(a,b){ return b.val-a.val; });
+  var srt=function(a,b){ return b.date<a.date?-1:b.date>a.date?1:0; }; pendL.sort(srt); paidL.sort(srt);
+  var det={};
+  det['sup.pend']={t:'GRNs not yet paid (ERP status other than Closed / Paid)',cols:[['GRN #','grn'],['Date','date','d'],['Supplier','vendor'],['PO #','po'],['Item','item'],['Qty','qty',1],['Value','val','m'],['ERP status','status']],rows:pendL,tot:{qty:1,val:'m'}};
+  det['sup.paid']={t:'GRNs paid (ERP status Closed / Paid)',cols:[['GRN #','grn'],['Date','date','d'],['Supplier','vendor'],['PO #','po'],['Item','item'],['Qty','qty',1],['Value','val','m'],['ERP status','status']],rows:paidL,tot:{qty:1,val:'m'}};
+  det['sup.vend']={t:'Balance payable \u2014 supplier by supplier',cols:[['Supplier','vendor'],['Pending GRNs','grns',1],['Lines','lines',1],['Balance payable','val','m']],rows:vend,tot:{grns:1,lines:1,val:'m'}};
+  return {tot:tot,paid:paid,bal:bal,lines:lines,grns:Object.keys(grnAll).length,pendGrns:Object.keys(grnPend).length,pendLines:pendL.length,vend:vend,det:det};
 }
 
 /* ---------------- 2. STORE ---------------- */
@@ -55748,17 +55794,29 @@ function ceoMp(D){
     if(!v&&d.manpowerV)v=Object.keys(d.manpowerV).reduce(function(s,k){ return s+N(d.manpowerV[k]); },0);
     if(!c&&d.manpower) c=Object.keys(d.manpower ).reduce(function(s,k){ return s+N(d.manpower[k]);  },0);
   }
-  return {vertical:v, contractor:c, total:v+c};
+  var det={}, lv=[], lc=[], la=[];
+  try{
+    var mv=(d&&d.manpowerV)||{}, mc=(d&&d.manpower)||{}, roles={};
+    Object.keys(mv).forEach(function(k){ if(N(mv[k]))lv.push({role:k,n:N(mv[k])}); roles[k]=1; });
+    Object.keys(mc).forEach(function(k){ if(N(mc[k]))lc.push({role:k,n:N(mc[k])}); roles[k]=1; });
+    Object.keys(roles).forEach(function(k){ var a=N(mv[k]), b=N(mc[k]); if(a||b)la.push({role:k,v:a,c:b,n:a+b}); });
+    var srt=function(a,b){ return b.n-a.n; }; lv.sort(srt); lc.sort(srt); la.sort(srt);
+  }catch(e){}
+  det['mp.v']={t:'Vertical man power on '+dLong(D)+' \u2014 trade by trade',cols:[['Trade / role','role'],['Men','n',1]],rows:lv,tot:{n:1}};
+  det['mp.c']={t:'Contractors\u2019 man power on '+dLong(D)+' \u2014 trade by trade',cols:[['Trade / role','role'],['Men','n',1]],rows:lc,tot:{n:1}};
+  det['mp.all']={t:'Man power on site on '+dLong(D),cols:[['Trade / role','role'],['Vertical','v',1],['Contractor','c',1],['Total','n',1]],rows:la,tot:{v:1,c:1,n:1}};
+  return {vertical:v, contractor:c, total:v+c, det:det};
 }
 
 /* ---------------- 4. WORK DONE against the BOQ ---------------- */
 function ceoWork(D){
-  var boqV=0, doneV=0, doneYest=0, g={}, order=[];
+  var boqV=0, doneV=0, doneYest=0, g={}, order=[], det={}, doneL=[], byG={}, byId={};
   var list=[]; try{ list=(typeof S!=='undefined'&&Array.isArray(S.boq))?S.boq:[]; }catch(e){}
   var prev=(function(){ var p=String(D).split('-'), dt=new Date(+p[0],+p[1]-1,+p[2]); dt.setDate(dt.getDate()-1); return ISO(dt); })();
+  var nm=function(b){ return String(b.name||b.item||b.desc||b.id||''); };
   list.forEach(function(b){
     var rate=N(b.rate), qty=N(b.qty);
-    boqV+=qty*rate;
+    boqV+=qty*rate; byId[b.id]=b;
     var dq=0, pq=0;
     try{ dq=(typeof cumQty==='function')?N(cumQty(b.id,D)):0; }catch(e){}
     try{ pq=(typeof cumQty==='function')?N(cumQty(b.id,prev)):0; }catch(e){}
@@ -55767,6 +55825,9 @@ function ceoWork(D){
     var k=String(b.group||'').trim()||'(no BOQ group)';
     if(!g[k]){ g[k]={name:k, boq:0, done:0, today:0, lines:0}; order.push(k); }
     g[k].boq+=qty*rate; g[k].done+=dq*rate; g[k].today+=Math.max(0,(dq-pq)*rate); g[k].lines++;
+    var ir={item:nm(b),unit:String(b.unit||''),boqQty:qty,done:dq,rate:rate,val:dq*rate,pct:qty?Math.min(100,dq/qty*100):0};
+    if(!byG[k])byG[k]=[]; byG[k].push(ir);
+    if(dq)doneL.push(ir);
   });
   var groups=order.map(function(k){
     var x=g[k];
@@ -55774,8 +55835,14 @@ function ceoWork(D){
     x.pct=x.boq?(x.done/x.boq*100):0;
     return x;
   }).sort(function(a,b){ return b.boq-a.boq; });
+  doneL.sort(function(a,b){ return b.val-a.val; });
+  det['work.done']={t:'Work done up to '+dLong(D)+' \u2014 BOQ item by item (measured qty \u00D7 rate)',cols:[['BOQ item','item'],['Unit','unit'],['BOQ qty','boqQty',1],['Done','done',1],['Rate','rate','m'],['Value','val','m'],['% done','pct','p']],rows:doneL,tot:{val:'m'}};
+  var todayL=[];
+  try{ (((S.days||{})[D]||{}).progress||[]).forEach(function(r){ var b=byId[r.boqId]; if(!b||!N(r.qty))return; todayL.push({item:nm(b),floor:String(r.floor||''),sub:String(r.sub||r.vendor||''),unit:String(b.unit||''),qty:N(r.qty),rate:N(b.rate),val:N(r.qty)*N(b.rate)}); }); }catch(e){}
+  det['work.today']={t:'Measurement lines on '+dLong(D),cols:[['BOQ item','item'],['Floor','floor'],['Sub / Contractor','sub'],['Unit','unit'],['Qty','qty',1],['Rate','rate','m'],['Value','val','m']],rows:todayL,tot:{qty:1,val:'m'}};
+  Object.keys(byG).forEach(function(k){ det['work.g:'+k]={t:k+' \u2014 item by item',cols:[['BOQ item','item'],['Unit','unit'],['BOQ qty','boqQty',1],['Done','done',1],['Rate','rate','m'],['Value done','val','m'],['% done','pct','p']],rows:byG[k],tot:{val:'m'}}; });
   return {boqVal:boqV, doneVal:doneV, todayVal:Math.max(0,doneV-doneYest),
-          pct:boqV?(doneV/boqV*100):0, groups:groups};
+          pct:boqV?(doneV/boqV*100):0, groups:groups, det:det};
 }
 
 /* ---------------- 5. FINANCE — site payments ---------------- */
@@ -55783,30 +55850,41 @@ function ceoFin(D){
   var list=[];
   try{ list=(typeof pbAll==='function')?pbAll():((typeof S!=='undefined'&&S.progressBills)||[]); }catch(e){ list=[]; }
   var recToday=0, recAll=0, recTodayN=0, recAllN=0;
-  var paidToday=0, paidAll=0;
+  var paidToday=0, paidAll=0, recL=[], recTL=[], payL=[], payTL=[];
   (list||[]).forEach(function(b){
     if(!b)return;
     var amt=0;
     try{ amt=(typeof payNetOf==='function')?N(payNetOf(b)):N(b.net||b.thisReq); }catch(e){ amt=N(b.net||b.thisReq); }
     /* received in Accounts — the day it was acknowledged, else the bill date */
     var rd=atDay(b.wf&&b.wf.received&&b.wf.received.at) || (b.wf&&b.wf.received?dnorm(b.date):'');
-    if(rd&&rd<=D){ recAll+=amt; recAllN++; if(rd===D){ recToday+=amt; recTodayN++; } }
+    var bp=0;
     var pays=[];
     try{ pays=(typeof payList==='function')?payList(b):(Array.isArray(b.payments)?b.payments:[]); }catch(e){ pays=[]; }
     (pays||[]).forEach(function(p){
       var pd=atDay(p.at)||dnorm(p.date); if(!pd||pd>D)return;
       var pa=N(p.amount);
-      paidAll+=pa; if(pd===D)paidToday+=pa;
+      paidAll+=pa; bp+=pa; if(pd===D)paidToday+=pa;
+      var pr={date:pd,no:String(b.no||b.billNo||''),vendor:String(b.vendor||b.contractor||''),amt:pa,ref:String(p.ref||p.mode||'')};
+      payL.push(pr); if(pd===D)payTL.push(pr);
     });
+    if(rd&&rd<=D){ recAll+=amt; recAllN++; if(rd===D){ recToday+=amt; recTodayN++; }
+      var rr={date:rd,no:String(b.no||b.billNo||''),vendor:String(b.vendor||b.contractor||''),bdate:dnorm(b.date),amt:amt,paid:bp,bal:Math.max(0,amt-bp)};
+      recL.push(rr); if(rd===D)recTL.push(rr); }
   });
+  var srt=function(a,b){ return b.date<a.date?-1:b.date>a.date?1:0; }; recL.sort(srt); payL.sort(srt);
+  var det={};
+  det['fin.rec']={t:'Bills received in Accounts up to '+dLong(D),cols:[['Received','date','d'],['Bill #','no'],['Contractor','vendor'],['Bill date','bdate','d'],['Amount','amt','m'],['Paid','paid','m'],['Balance','bal','m']],rows:recL,tot:{amt:'m',paid:'m',bal:'m'}};
+  det['fin.recToday']={t:'Bills received on '+dLong(D),cols:[['Bill #','no'],['Contractor','vendor'],['Bill date','bdate','d'],['Amount','amt','m']],rows:recTL,tot:{amt:'m'}};
+  det['fin.paid']={t:'Payments made up to '+dLong(D),cols:[['Paid on','date','d'],['Bill #','no'],['Contractor','vendor'],['Ref / mode','ref'],['Amount','amt','m']],rows:payL,tot:{amt:'m'}};
+  det['fin.paidToday']={t:'Payments made on '+dLong(D),cols:[['Bill #','no'],['Contractor','vendor'],['Ref / mode','ref'],['Amount','amt','m']],rows:payTL,tot:{amt:'m'}};
   return {recToday:recToday, recAll:recAll, recTodayN:recTodayN, recAllN:recAllN,
-          paidToday:paidToday, paidAll:paidAll, balance:Math.max(0,recAll-paidAll)};
+          paidToday:paidToday, paidAll:paidAll, balance:Math.max(0,recAll-paidAll), det:det};
 }
 
 /* ---------------- 6. CONCRETE — poured today and up to date, grade by grade ---------------- */
 function ceoConc(D){
   var rows=[]; try{ rows=(typeof cxRows==='function')?cxRows():[]; }catch(e){ rows=[]; }
-  var m={}, unit='';
+  var m={}, unit='', det={}, allL=[], todL=[], byMix={};
   rows.forEach(function(r){
     var d=String(r.d||'').slice(0,10); if(!d||d>D)return;
     var q=N(r.qty); if(!q)return;
@@ -55814,8 +55892,15 @@ function ceoConc(D){
     var k=String(r.mix||'').trim()||'(grade not set)';
     if(!m[k])m[k]={mix:k,today:0,upto:0,trips:0,tripsToday:0};
     m[k].upto+=q; m[k].trips++;
-    if(d===D){ m[k].today+=q; m[k].tripsToday++; }
+    var pr={date:d,mix:k,item:String(r.item||''),floor:String(r.floor||''),vendor:String(r.vendor||''),slip:String(r.slip||''),qty:q};
+    allL.push(pr); if(!byMix[k])byMix[k]=[]; byMix[k].push(pr);
+    if(d===D){ m[k].today+=q; m[k].tripsToday++; todL.push(pr); }
   });
+  var srt=function(a,b){ return b.date<a.date?-1:b.date>a.date?1:0; }; allL.sort(srt);
+  var CC=[['Date','date','d'],['Grade','mix'],['Element','item'],['Floor','floor'],['Supplier','vendor'],['Slip','slip'],['Qty','qty',1]];
+  det['conc.today']={t:'Concrete poured on '+dLong(D),cols:CC,rows:todL,tot:{qty:1}};
+  det['conc.upto']={t:'Every pour up to '+dLong(D),cols:CC,rows:allL,tot:{qty:1}};
+  Object.keys(byMix).forEach(function(k){ byMix[k].sort(srt); det['conc.m:'+k]={t:k+' \u2014 every pour up to '+dLong(D),cols:CC,rows:byMix[k],tot:{qty:1}}; });
   var out=Object.keys(m).map(function(k){ return m[k]; });
   out.sort(function(a,b){
     var pa=parseFloat(String(a.mix).replace(/[^0-9.]/g,''))||0,
@@ -55827,7 +55912,7 @@ function ceoConc(D){
     uptoTot:out.reduce(function(s,x){ return s+x.upto; },0),
     tripsToday:out.reduce(function(s,x){ return s+x.tripsToday; },0),
     trips:out.reduce(function(s,x){ return s+x.trips; },0),
-    unit:/m3|cubic/i.test(unit)?'Cu.Mtr':'Cu.Mtr'};
+    unit:/m3|cubic/i.test(unit)?'Cu.Mtr':'Cu.Mtr', det:det};
 }
 
 /* the value measured on each of the last n days — straight off the progress sheets */
@@ -55846,8 +55931,11 @@ function ceoTrend(D,n){
   return out;
 }
 function ceoDataAt(D){
-  return {D:D, proc:ceoProc(D), store:ceoStore(D), mp:ceoMp(D), work:ceoWork(D), fin:ceoFin(D),
-          conc:ceoConc(D), trend:ceoTrend(D,7)};
+  var d={D:D, proc:ceoProc(D), store:ceoStore(D), mp:ceoMp(D), work:ceoWork(D), fin:ceoFin(D),
+          conc:ceoConc(D), sup:ceoSup(D), trend:ceoTrend(D,7)};
+  d.det={};
+  ['proc','mp','work','fin','conc','sup'].forEach(function(k){ var x=d[k]&&d[k].det; if(x)Object.keys(x).forEach(function(kk){ d.det[kk]=x[kk]; }); });
+  return d;
 }
 function ceoData(){ return ceoDataAt(ceoDay()); }
 
@@ -55871,7 +55959,23 @@ var CEO_CSS=[
 '.ce-dt{text-align:right;font-size:.66rem;line-height:1.45;color:#a9c8e6;white-space:nowrap;text-transform:uppercase;letter-spacing:.07em}',
 '.ce-dt b{display:block;font-size:.84rem;color:#fff;font-weight:800;letter-spacing:0;text-transform:none}',
 /* KPI strip */
-'.ce-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:0;border-bottom:1px solid #d7e2ee}',
+'.ce-kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:0;border-bottom:1px solid #d7e2ee}',
+/* click-to-open detail — on the screen only, never on paper */
+'.ce-cl{cursor:pointer}.ce-cl:hover td,.ce-cl:hover{background:#eaf3fb !important}',
+'.ce-cl td.l::after,td.l.ce-cl::after,.ce-kpi.ce-cl .l::after{content:" \\25B8";color:#9fb3c8;font-size:.9em}',
+'.ce-det td{padding:0 !important;background:#f4f8fc !important;border-bottom:2px solid #c9d8e8 !important}',
+'.ce-detbox{margin:5px 8px 9px;border:1px solid #c9d8e8;border-radius:7px;background:#fff;overflow:hidden}',
+'.ce-detbox .dh{display:flex;align-items:center;gap:8px;padding:6px 10px;background:#eef4fa;font-size:.7rem;font-weight:800;color:#12283f}',
+'.ce-detbox .dh span{flex:1}.ce-detbox .dh b{color:#6d8199;font-weight:600}',
+'.ce-detbox .dh button{border:1px solid #c9d8e8;background:#fff;border-radius:6px;padding:2px 8px;font-size:.68rem;cursor:pointer;color:#41586f}',
+'.ce-detbox .dw{max-height:280px;overflow:auto}',
+'.ce-detbox table{width:100%;border-collapse:collapse;font-size:.7rem}',
+'.ce-detbox th{position:sticky;top:0;background:#f7fafd;color:#41586f;font-size:.6rem;letter-spacing:.05em;text-transform:uppercase;text-align:left;padding:5px 8px;border-bottom:1px solid #d7e2ee;white-space:nowrap}',
+'.ce-detbox td{padding:4px 8px !important;border-bottom:1px solid #edf2f7 !important;background:#fff !important;color:#1f3247;vertical-align:top}',
+'.ce-detbox th.n,.ce-detbox td.n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}',
+'.ce-detbox tr.tt td{background:#eef4fa !important;font-weight:800}',
+'.ce-detbox .none{padding:12px;color:#8798ab;text-align:center;font-size:.74rem}',
+'.ce-kdet{grid-column:1/-1;border-top:1px solid #d7e2ee;background:#f4f8fc}',
 '.ce-kpi{padding:9px 13px;border-right:1px solid #e4ebf3;border-top:3px solid #2c6fa8;background:#fbfdff}',
 '.ce-kpi:last-child{border-right:none}',
 '.ce-kpi .l{font-size:.6rem;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:#6d8199}',
@@ -56014,15 +56118,19 @@ function LG(c,label,val){
   return '<div><i style="background:'+c+'"></i>'+EX(label)+(val!=null?(' &nbsp;<b>'+EX(val)+'</b>'):'')+'</div>';
 }
 
+var CEO_DETS={};
 function ceoSheetHTML(d){
-  var p=d.proc, m=d.mp, w=d.work, f=d.fin, cc=d.conc;
+  var p=d.proc, m=d.mp, w=d.work, f=d.fin, cc=d.conc, sp=d.sup||{tot:0,paid:0,bal:0,lines:0,grns:0,pendGrns:0,pendLines:0,vend:[]};
   var logo=ceoLogo();
+  var ceid='ce'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+  CEO_DETS[ceid]=d.det||{};
+  var CK=function(k){ return (d.det&&d.det[k])?(' class="ce-kpi ce-cl" data-ced="'+EX(k)+'"'):' class="ce-kpi"'; };
   var bal=Math.max(0,w.boqVal-w.doneVal);
   var prDone=Math.max(0,p.prAllNos-p.prPendNos);
   var poDone=Math.max(0,p.poAllNos-p.poPendNos);
 
   /* ---- header ---- */
-  var h='<div class="ce-sheet">'+
+  var h='<div class="ce-sheet" data-ceid="'+ceid+'">'+
     '<div class="ce-top">'+
       (logo||'<div style="width:120px"></div>')+
       '<div class="ce-ttl"><h1>Executive Report</h1>'+
@@ -56033,14 +56141,16 @@ function ceoSheetHTML(d){
 
   /* ---- 5 headline figures ---- */
     '<div class="ce-kpis">'+
-      '<div class="ce-kpi" style="border-top-color:'+C_GREEN+'"><div class="l">Work done (BOQ)</div>'+
+      '<div'+CK('work.done')+' style="border-top-color:'+C_GREEN+'"><div class="l">Work done (BOQ)</div>'+
         '<div class="v" style="color:'+C_GREEN+'">'+PCT(w.pct)+'</div><div class="s">'+RSS(w.doneVal)+' of '+RSS(w.boqVal).replace('Rs ','')+'</div></div>'+
-      '<div class="ce-kpi" style="border-top-color:'+C_BLUE+'"><div class="l">Man power today</div>'+
+      '<div'+CK('mp.all')+' style="border-top-color:'+C_BLUE+'"><div class="l">Man power today</div>'+
         '<div class="v">'+NUM(m.total)+'</div><div class="s">'+NUM(m.vertical)+' vertical &middot; '+NUM(m.contractor)+' contractor</div></div>'+
-      '<div class="ce-kpi" style="border-top-color:'+C_ORANGE+'"><div class="l">Pending POs</div>'+
+      '<div'+CK('po.pend')+' style="border-top-color:'+C_ORANGE+'"><div class="l">Pending POs</div>'+
         '<div class="v" style="color:'+C_ORANGE+'">'+RSS(p.poPendAmt)+'</div><div class="s">'+NUM(p.poPendNos)+' PO &middot; '+NUM(p.poPendItems)+' items</div></div>'+
-      '<div class="ce-kpi" style="border-top-color:'+C_RED+'"><div class="l">Balance to be paid</div>'+
+      '<div'+CK('fin.rec')+' style="border-top-color:'+C_RED+'"><div class="l">Contractor balance to pay</div>'+
         '<div class="v" style="color:'+C_RED+'">'+RSS(f.balance)+'</div><div class="s">paid '+RSS(f.paidAll)+' of '+RSS(f.recAll)+'</div></div>'+
+      '<div'+CK('sup.vend')+' style="border-top-color:#7c2d8e"><div class="l">Supplier payable (GRN)</div>'+
+        '<div class="v" style="color:#7c2d8e">'+RSS(sp.bal)+'</div><div class="s">'+NUM(sp.pendGrns)+' GRN pending &middot; paid '+RSS(sp.paid)+'</div></div>'+
     '</div>'+
 
   /* ---- the three pictures ---- */
@@ -56074,15 +56184,15 @@ function ceoSheetHTML(d){
     '<div class="ce-grid">'+
       '<div class="ce-col"><table class="ce"><tbody>'+
         '<tr><td class="h" colspan="2">Procurement Section</td></tr>'+
-        row('PR generated today (Nos / Items)',NUM(p.prTodayNos)+' / '+NUM(p.prTodayItems))+
-        row('Total PR generated (Nos / Items)',NUM(p.prAllNos)+' / '+NUM(p.prAllItems),1)+
-        row('Total pending PR (Nos / Items)',NUM(p.prPendNos)+' / '+NUM(p.prPendItems),0,'o')+
-        row('PO generated today (Nos / Items)',NUM(p.poTodayNos)+' / '+NUM(p.poTodayItems),1)+
-        row('Today PO generated (Amount)',RS(p.poTodayAmt))+
-        row('Total pending POs (Nos / Items)',NUM(p.poPendNos)+' / '+NUM(p.poPendItems),1,'o')+
-        row('Total PO value raised (up to date)',RS(p.poAllAmt))+
-        row('Material received \u2014 GRN value',RS(p.grnVal),1,'g')+
-        '<tr class="tot"><td class="l">Total pending POs amount</td><td class="v r">'+RS(p.poPendAmt)+'</td></tr>'+
+        row('PR generated today (Nos / Items)',NUM(p.prTodayNos)+' / '+NUM(p.prTodayItems),0,'','pr.today')+
+        row('Total PR generated (Nos / Items)',NUM(p.prAllNos)+' / '+NUM(p.prAllItems),1,'','pr.all')+
+        row('Total pending PR (Nos / Items)',NUM(p.prPendNos)+' / '+NUM(p.prPendItems),0,'o','pr.pend')+
+        row('PO generated today (Nos / Items)',NUM(p.poTodayNos)+' / '+NUM(p.poTodayItems),1,'','po.today')+
+        row('Today PO generated (Amount)',RS(p.poTodayAmt),0,'','po.today')+
+        row('Total pending POs (Nos / Items)',NUM(p.poPendNos)+' / '+NUM(p.poPendItems),1,'o','po.pend')+
+        row('Total PO value raised (up to date)',RS(p.poAllAmt),0,'','po.all')+
+        row('Material received \u2014 GRN value',RS(p.grnVal),1,'g','grn.all')+
+        '<tr class="tot ce-cl" data-ced="po.pend"><td class="l">Total pending POs amount</td><td class="v r">'+RS(p.poPendAmt)+'</td></tr>'+
         '<tr><td colspan="2" style="padding:6px 10px 8px">'+
           '<div style="font-size:.62rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#6d8199;margin-bottom:3px">PR covered by a PO</div>'+
           sbar(prDone,p.prPendNos,C_GREEN,C_ORANGE,240)+
@@ -56097,13 +56207,13 @@ function ceoSheetHTML(d){
 
       '<div class="ce-col"><table class="ce"><tbody>'+
         '<tr><td class="h b3" colspan="2">Site Man Power</td></tr>'+
-        row('Total vertical man power',NUM(m.vertical))+
-        row('Total contractors man power',NUM(m.contractor),1)+
-        '<tr class="tot"><td class="l">Total man power on site today</td><td class="v g">'+NUM(m.total)+'</td></tr>'+
+        row('Total vertical man power',NUM(m.vertical),0,'','mp.v')+
+        row('Total contractors man power',NUM(m.contractor),1,'','mp.c')+
+        '<tr class="tot ce-cl" data-ced="mp.all"><td class="l">Total man power on site today</td><td class="v g">'+NUM(m.total)+'</td></tr>'+
 
         '<tr><td class="h b4" colspan="2">Total Work Done</td></tr>'+
-        row('Work done today — Rs',RS(w.todayVal),0,'g')+
-        '<tr class="tot"><td class="l">Work done up to now &middot; '+PCT(w.pct)+'</td>'+
+        row('Work done today — Rs',RS(w.todayVal),0,'g','work.today')+
+        '<tr class="tot ce-cl" data-ced="work.done"><td class="l">Work done up to now &middot; '+PCT(w.pct)+'</td>'+
           '<td class="v g">'+RS(w.doneVal)+'</td></tr>'+
       '</tbody></table>'+
 
@@ -56113,12 +56223,12 @@ function ceoSheetHTML(d){
         '<tr class="sub"><td>Design mix (PSI)</td><td class="v">Poured today</td><td class="v">Up to date</td></tr>'+
         (cc.rows.length
           ? cc.rows.map(function(r,i){
-              return '<tr'+(i%2?' class="alt"':'')+'><td class="l">'+EX(r.mix)+'</td>'+
+              return '<tr class="ce-cl'+(i%2?' alt':'')+'" data-ced="conc.m:'+EX(r.mix)+'"><td class="l">'+EX(r.mix)+'</td>'+
                 '<td class="v'+(r.today>0?' g':'')+'">'+(r.today>0?F2(r.today):'\u2014')+'</td>'+
                 '<td class="v">'+F2(r.upto)+'</td></tr>';
             }).join('')
           : '<tr><td colspan="3" style="text-align:center;color:#8798ab;padding:10px">No ready-mix pour recorded</td></tr>')+
-        '<tr class="tot"><td class="l">Total concrete poured</td>'+
+        '<tr class="tot ce-cl" data-ced="'+(cc.todayTot>0?'conc.today':'conc.upto')+'"><td class="l">Total concrete poured</td>'+
           '<td class="v'+(cc.todayTot>0?' g':'')+'">'+(cc.todayTot>0?F2(cc.todayTot):'\u2014')+'</td>'+
           '<td class="v">'+F2(cc.uptoTot)+'</td></tr>'+
         '<tr><td colspan="3" style="font-size:.66rem;color:#7a8ea3;padding:4px 10px 6px">'+
@@ -56137,13 +56247,26 @@ function ceoSheetHTML(d){
   /* ---- finance ---- */
     '<table class="ce ce-fin"><tbody>'+
       '<tr><td class="h" colspan="4">Finance Section &mdash; Site Payments</td></tr>'+
-      '<tr><td class="l">Bills received today (Amount)</td><td class="v">'+RS(f.recToday)+'</td>'+
-        '<td class="l">Paid today (Amount)</td><td class="v">'+RS(f.paidToday)+'</td></tr>'+
-      '<tr class="alt"><td class="l">Total bills received (up to now)</td><td class="v">'+RS(f.recAll)+'</td>'+
-        '<td class="l">Total paid (up to now)</td><td class="v g">'+RS(f.paidAll)+'</td></tr>'+
-      '<tr class="tot"><td class="l">Bills received (Nos) &mdash; today / total</td>'+
-        '<td class="v">'+NUM(f.recTodayN)+' / '+NUM(f.recAllN)+'</td>'+
-        '<td class="l">Total balance to be paid</td><td class="v r">'+RS(f.balance)+'</td></tr>'+
+      '<tr><td class="l ce-cl" data-ced="fin.recToday">Bills received today (Amount)</td><td class="v ce-cl" data-ced="fin.recToday">'+RS(f.recToday)+'</td>'+
+        '<td class="l ce-cl" data-ced="fin.paidToday">Paid today (Amount)</td><td class="v ce-cl" data-ced="fin.paidToday">'+RS(f.paidToday)+'</td></tr>'+
+      '<tr class="alt"><td class="l ce-cl" data-ced="fin.rec">Total bills received (up to now)</td><td class="v ce-cl" data-ced="fin.rec">'+RS(f.recAll)+'</td>'+
+        '<td class="l ce-cl" data-ced="fin.paid">Total paid (up to now)</td><td class="v g ce-cl" data-ced="fin.paid">'+RS(f.paidAll)+'</td></tr>'+
+      '<tr class="tot"><td class="l ce-cl" data-ced="fin.rec">Bills received (Nos) &mdash; today / total</td>'+
+        '<td class="v ce-cl" data-ced="fin.rec">'+NUM(f.recTodayN)+' / '+NUM(f.recAllN)+'</td>'+
+        '<td class="l ce-cl" data-ced="fin.rec">Total balance to be paid</td><td class="v r ce-cl" data-ced="fin.rec">'+RS(f.balance)+'</td></tr>'+
+    '</tbody></table>'+
+
+  /* ---- supplier payable, as per the GRN register ---- */
+    '<table class="ce ce-fin ce-sup"><tbody>'+
+      '<tr><td class="h b2" colspan="4">Supplier Payable &mdash; as per GRN (Closed = paid, the rest payable)</td></tr>'+
+      '<tr><td class="l ce-cl" data-ced="grn.all">GRN received up to date (value)</td><td class="v ce-cl" data-ced="grn.all">'+RS(sp.tot)+'</td>'+
+        '<td class="l ce-cl" data-ced="sup.paid">Paid &mdash; GRNs closed</td><td class="v g ce-cl" data-ced="sup.paid">'+RS(sp.paid)+'</td></tr>'+
+      '<tr class="alt"><td class="l ce-cl" data-ced="sup.pend">GRNs pending (Nos / lines)</td><td class="v ce-cl" data-ced="sup.pend">'+NUM(sp.pendGrns)+' / '+NUM(sp.pendLines)+'</td>'+
+        '<td class="l ce-cl" data-ced="sup.pend">Balance payable to suppliers</td><td class="v r ce-cl" data-ced="sup.pend">'+RS(sp.bal)+'</td></tr>'+
+      (sp.vend.length?('<tr class="tot"><td class="l ce-cl" data-ced="sup.vend" colspan="4" style="font-weight:600">'+
+        '<span style="font-size:.62rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#6d8199">Payable by supplier &mdash; </span>'+
+        sp.vend.slice(0,6).map(function(v){ return EX(v.vendor)+' <b>'+RSS(v.val)+'</b>'; }).join(' &nbsp;&middot;&nbsp; ')+
+        (sp.vend.length>6?(' &nbsp;&middot;&nbsp; +'+(sp.vend.length-6)+' more'):'')+'</td></tr>'):'')+
     '</tbody></table>'+
 
     /* ---- BOQ by BOQ ---- */
@@ -56152,14 +56275,14 @@ function ceoSheetHTML(d){
       '<tr class="sub"><td>BOQ / Section</td><td class="v">BOQ value</td><td class="v">Work done</td>'+
         '<td class="v">Balance</td><td class="pc">% done</td></tr>'+
       (w.groups.length?w.groups.map(function(x,i){
-        return '<tr'+(i%2?' class="alt"':'')+'><td class="l">'+EX(x.name)+
+        return '<tr class="ce-cl'+(i%2?' alt':'')+'" data-ced="work.g:'+EX(x.name)+'"><td class="l">'+EX(x.name)+
             '<small> &middot; '+NUM(x.lines)+' item'+(x.lines===1?'':'s')+'</small></td>'+
           '<td class="v">'+RS(x.boq)+'</td>'+
           '<td class="v g">'+RS(x.done)+'</td>'+
           '<td class="v'+(x.bal>0?' o':'')+'">'+RS(x.bal)+'</td>'+
           '<td class="pc">'+pcBar(x.pct)+'</td></tr>';
       }).join(''):'<tr><td colspan="5" style="text-align:center;color:#8798ab;padding:10px">No BOQ loaded</td></tr>')+
-      '<tr class="tot"><td class="l">All BOQs together</td>'+
+      '<tr class="tot ce-cl" data-ced="work.done"><td class="l">All BOQs together</td>'+
         '<td class="v">'+RS(w.boqVal)+'</td><td class="v g">'+RS(w.doneVal)+'</td>'+
         '<td class="v o">'+RS(Math.max(0,w.boqVal-w.doneVal))+'</td>'+
         '<td class="pc">'+pcBar(w.pct)+'</td></tr>'+
@@ -56169,9 +56292,60 @@ function ceoSheetHTML(d){
     '</div>';
   return h;
 }
-function row(l,v,alt,cls){
-  return '<tr'+(alt?' class="alt"':'')+'><td class="l">'+EX(l)+'</td><td class="v'+(cls?(' '+cls):'')+'">'+v+'</td></tr>';
+function row(l,v,alt,cls,key){
+  var c=(alt?'alt':'')+(key?' ce-cl':'');
+  return '<tr'+(c.trim()?(' class="'+c.trim()+'"'):'')+(key?(' data-ced="'+EX(key)+'"'):'')+'><td class="l">'+EX(l)+'</td><td class="v'+(cls?(' '+cls):'')+'">'+v+'</td></tr>';
 }
+
+/* ---------- the detail behind a figure: opens under the row, screen only ---------- */
+function ceoCell(v,t){
+  if(t==='m')return '<td class="n">'+NUM(Math.round(N(v)))+'</td>';
+  if(t==='p')return '<td class="n">'+(isFinite(v)?(+v).toFixed(1)+' %':'')+'</td>';
+  if(t==='d')return '<td style="white-space:nowrap">'+EX(v?fmtD(v):'')+'</td>';
+  if(t===1)return '<td class="n">'+(N(v)?F2n(N(v)):(v===0?'0':''))+'</td>';
+  return '<td>'+EX(v==null?'':v)+'</td>';
+}
+function fmtD(s){ try{ if(typeof fmtMed==='function')return fmtMed(s); }catch(e){} return s; }
+function F2n(n){ return (Math.round(n*100)/100).toLocaleString('en-US'); }
+function ceoDetHTML(det){
+  var rows=det.rows||[], cap=500, shown=rows.slice(0,cap);
+  var h='<div class="ce-detbox"><div class="dh"><span>'+EX(det.t)+' <b>&middot; '+NUM(rows.length)+' row'+(rows.length===1?'':'s')+(rows.length>cap?(' (first '+cap+' shown)'):'')+'</b></span><button type="button" data-cedx="1">\u2715 close</button></div>';
+  if(!rows.length){ h+='<div class="none">Nothing behind this figure on this date.</div></div>'; return h; }
+  h+='<div class="dw"><table><thead><tr>'+det.cols.map(function(c){ return '<th'+((c[2]===1||c[2]==='m'||c[2]==='p')?' class="n"':'')+'>'+EX(c[0])+'</th>'; }).join('')+'</tr></thead><tbody>';
+  shown.forEach(function(r){ h+='<tr>'+det.cols.map(function(c){ return ceoCell(r[c[1]],c[2]); }).join('')+'</tr>'; });
+  if(det.tot){
+    var t={}; rows.forEach(function(r){ Object.keys(det.tot).forEach(function(k){ t[k]=(t[k]||0)+N(r[k]); }); });
+    h+='<tr class="tt">'+det.cols.map(function(c,i){ if(det.tot[c[1]]!=null)return ceoCell(t[c[1]],det.tot[c[1]]===1?1:'m'); return i===0?'<td>TOTAL</td>':'<td></td>'; }).join('')+'</tr>';
+  }
+  return h+'</tbody></table></div></div>';
+}
+function ceoClosePanels(sheet,except){
+  sheet.querySelectorAll('.ce-det,.ce-kdet').forEach(function(x){ if(x!==except)x.remove(); });
+}
+document.addEventListener('click',function(e){
+  var t=e.target; if(!t||!t.closest)return;
+  var x=t.closest('[data-cedx]'); if(x){ var pnl=x.closest('.ce-det,.ce-kdet'); if(pnl)pnl.remove(); return; }
+  var el=t.closest('[data-ced]'); if(!el)return;
+  var sheet=el.closest('.ce-sheet'); if(!sheet)return;
+  var det=(CEO_DETS[sheet.getAttribute('data-ceid')]||{})[el.getAttribute('data-ced')]; if(!det)return;
+  var tr=el.closest('tr');
+  if(tr){
+    var nx=tr.nextElementSibling;
+    if(nx&&nx.classList.contains('ce-det')&&nx.getAttribute('data-for')===el.getAttribute('data-ced')){ nx.remove(); return; }
+    ceoClosePanels(sheet);
+    var cols=0; Array.prototype.forEach.call(tr.children,function(td){ cols+=(+td.getAttribute('colspan')||1); });
+    var d=document.createElement('tr'); d.className='ce-det no-print'; d.setAttribute('data-for',el.getAttribute('data-ced'));
+    d.innerHTML='<td colspan="'+cols+'">'+ceoDetHTML(det)+'</td>';
+    tr.parentNode.insertBefore(d,tr.nextSibling);
+  }else{
+    var grid=el.closest('.ce-kpis'); if(!grid)return;
+    var cur=grid.querySelector('.ce-kdet');
+    if(cur&&cur.getAttribute('data-for')===el.getAttribute('data-ced')){ cur.remove(); return; }
+    ceoClosePanels(sheet);
+    var box=document.createElement('div'); box.className='ce-kdet no-print'; box.setAttribute('data-for',el.getAttribute('data-ced'));
+    box.innerHTML=ceoDetHTML(det); grid.appendChild(box);
+  }
+},true);
 
 function renderCeoRep(){
   var host=document.getElementById('ceoBody'); if(!host)return;
@@ -56231,6 +56405,7 @@ function ceoPrint(dd){
     'html,body{margin:0;padding:0}'+
     'body{font-family:Segoe UI,Arial,sans-serif;color:#1f3247}'+
     CEO_CSS+
+    '.ce-det,.ce-kdet{display:none !important}.ce-cl td.l::after,td.l.ce-cl::after,.ce-kpi.ce-cl .l::after{content:none !important}'+
     '#pgfit{width:'+PG_W+'px;transform-origin:top left}'+
     '.ce-sheet{max-width:none;width:100%;box-shadow:none;border:1px solid #9fb3c8;border-radius:8px}'+
     'table.ce{font-size:8.4pt}table.ce td{padding:3.5px 9px}'+
@@ -56294,7 +56469,10 @@ function ceoCsv(){
     ['Total Bills Received Amount (up to now)',Math.round(fi.recAll)],
     ['Paid Today (Amount)',Math.round(fi.paidToday)],
     ['Total Paid (Amount) up to now',Math.round(fi.paidAll)],
-    ['Total Balance to be Paid',Math.round(fi.balance)]
+    ['Total Balance to be Paid',Math.round(fi.balance)],['',''],
+    ['SUPPLIER PAYABLE (GRN)',''],
+    ['GRN received up to date (value)',Math.round((d.sup||{}).tot||0)],['Paid - GRNs closed',Math.round((d.sup||{}).paid||0)],
+    ['GRNs pending (Nos)',(d.sup||{}).pendGrns||0],['Balance payable to suppliers',Math.round((d.sup||{}).bal||0)]
   ];
   var q=function(v){ v=String(v==null?'':v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
   var body=rows.map(function(r){ return r.map(q).join(','); }).join('\n');
