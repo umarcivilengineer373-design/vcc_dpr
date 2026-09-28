@@ -51064,7 +51064,7 @@ function cosOpen(){
     cosPaint();
   });
 }
-function cosClose(){
+function cosClose(){ try{ if(typeof TK_OPEN!=='undefined')TK_OPEN=false; }catch(e){}
   var ov=document.getElementById('cosOv'); if(ov)ov.remove();
   var f=document.getElementById('cosPrintFrame'); if(f)f.remove();
 }
@@ -51281,8 +51281,8 @@ function taskAll(){
         project:projs[0]||'',detail:p.action||p.agenda||'',
         sub:(p.action&&p.agenda?('Point: '+p.agenda):'')+(p.rem?((p.action&&p.agenda?' \u00b7 ':'')+p.rem):''),
         location:m.venue||'',poc:p.by||'',
-        target:iso,targetTxt:p.due||'',priority:'Normal',status:st,
-        flag:dueFlag(iso,st),lu:null,nUpd:0,ref:(m.ref||'')+' \u00b7 '+(m.agenda||m.title||''),
+        target:iso,targetTxt:p.due||'',priority:p0.prio||p.prio||'Normal',status:st,
+        flag:dueFlag(iso,st),lu:lastUpd(p0),nUpd:(p0.updates||[]).length,ref:(m.ref||'')+' \u00b7 '+(m.agenda||m.title||''),
         raw:{m:m,p:p}});
     });
   });
@@ -51304,7 +51304,7 @@ function taskAll(){
     out.push({src:'daily',kind:'Daily',id:r.id,sno:'',date:r.d||'',project:r.proj||'',
       detail:r.work||'',sub:r.note||'',location:'',poc:r.by||'',
       target:r.tgt||r.d||'',targetTxt:'',priority:r.prio||'Normal',status:st,
-      flag:dueFlag(r.tgt||r.d,st),lu:null,nUpd:0,
+      flag:dueFlag(r.tgt||r.d,st),lu:lastUpd(r),nUpd:(r.updates||[]).length,
       ref:(r.raised&&r.raised!==r.d)?('raised '+dShort(r.raised)):'',ord:num(r.ord),ts:num(r._u),raw:r});
   });
   return out;
@@ -51350,6 +51350,7 @@ function cosTaskTab(body){
         ' · '+nMom+' MOM point'+(nMom===1?'':'s')+' · '+nDay+' daily line'+(nDay===1?'':'s')+'</span>'+
       '<span class="sp"></span>'+
       (cosCanEdit()?'<button class="p" id="tkNew">➕ New task</button>':'')+
+      (cosCanEdit()?('<button class="'+(TK_OPEN?'p':'g')+'" id="tkLock" style="'+(TK_OPEN?'background:#1c7a42;border-color:#1c7a42':'')+'" title="'+(TK_OPEN?'Lock the locked days again':'One admin password opens every locked line')+'">'+(TK_OPEN?'🔒 Save & Lock':'🔓 Unlock all')+'</button>'):'')+
       '<button class="g" id="tkPrint">🖨 Print</button>'+
       '<button class="g" id="tkCsv">⬇ CSV</button>'+
     '</div><div class="cos-cb">'+
@@ -51394,8 +51395,8 @@ function cosTaskTab(body){
           '<td>'+E(r.location||'—')+'</td>'+
           '<td>'+E(r.poc||'—')+'</td>'+
           '<td>'+E(r.target?dShort(r.target):(r.targetTxt||'—'))+(fl?('<br>'+pill(fl)):'')+'</td>'+
-          '<td>'+pill(r.priority||'Normal')+'</td>'+
-          '<td>'+(lu?('<div style="white-space:pre-wrap">'+E(lu.t)+'</div><div style="font-size:.68rem;color:#8798ab;margin-top:2px">'+E(dShort(lu.d))+' · '+E(lu.by||'')+(r.nUpd>1?(' · '+r.nUpd+' updates'):'')+'</div>'):'<span style="color:#aab7c5">—</span>')+'</td>'+
+          '<td>'+taskPrioCell(r)+'</td>'+
+          '<td>'+(lu?('<div style="white-space:pre-wrap">'+E(lu.t)+'</div><div style="font-size:.68rem;color:#8798ab;margin-top:2px">'+E(dShort(lu.d))+' · '+E(lu.by||'')+(r.nUpd>1?(' · '+r.nUpd+' updates'):'')+'</div>'):'<span style="color:#aab7c5">—</span>')+taskUpdBox(r)+'</td>'+
           '<td>'+taskStatusCell(r)+'</td>'+
           '<td style="white-space:nowrap;text-align:right">'+
             (r.src==='task'
@@ -51418,9 +51419,14 @@ function cosTaskTab(body){
   if(q){ var qt=null; q.addEventListener('input',function(){ clearTimeout(qt); qt=setTimeout(function(){
     TF.q=q.value; cosPaint(); var n=document.querySelector('#tfQ'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } },260); }); }
   if(B('#tkNew'))B('#tkNew').onclick=function(){ taskForm(null); };
+  if(B('#tkLock'))B('#tkLock').onclick=tkToggleOpen;
   /* a MOM point or a daily line opens where it belongs */
   body.querySelectorAll('[data-tst]').forEach(function(sl){ sl.addEventListener('change',function(){
     var pr=String(sl.dataset.tst).split('|'); taskSetStatus(pr[0],pr.slice(1).join('|'),sl.value); }); });
+  body.querySelectorAll('[data-tpr]').forEach(function(sl){ sl.addEventListener('change',function(){
+    var pr=String(sl.dataset.tpr).split('|'); taskSetPrio(pr[0],pr.slice(1).join('|'),sl.value); }); });
+  body.querySelectorAll('[data-tupd]').forEach(function(inp){ inp.addEventListener('keydown',function(e){
+    if(e.key!=='Enter')return; e.preventDefault(); var pr=String(inp.dataset.tupd).split('|'); taskAddUpd(pr[0],pr.slice(1).join('|'),inp.value); }); });
   body.querySelectorAll('[data-tedit]').forEach(function(b2){ b2.onclick=function(){
     var pr=String(b2.dataset.tedit).split('|'); taskEditOther(pr[0],pr.slice(1).join('|')); }; });
   body.querySelectorAll('[data-tgo]').forEach(function(b2){ b2.onclick=function(){
@@ -51459,6 +51465,52 @@ function cosTaskTab(body){
   };
 }
 
+/* ---------- one password opens every locked line on the register, until Save & Lock ---------- */
+var TK_OPEN=false;
+function tkLocked(d){ if(TK_OPEN)return false; return (typeof dwtLocked==='function')&&dwtLocked(d); }
+function tkToggleOpen(){
+  if(TK_OPEN){ TK_OPEN=false; cosSave(); cosPaint(); T('\uD83D\uDD12 Tasks saved & locked.'); return; }
+  cosPass('\uD83D\uDD13 Unlock the Tasks register','Admin password once \u2014 every locked line can then be changed until you press Save & Lock.').then(function(ok){
+    if(ok==null)return; TK_OPEN=true; cosPaint(); T('\uD83D\uDD13 Tasks unlocked \u2014 make your changes, then press Save & Lock.');
+  });
+}
+/* ---------- priority, changed right on the register ---------- */
+function tkRowLocked(r){ return r.src==='daily'&&tkLocked((r.raw||{}).d); }
+function taskPrioCell(r){
+  if(!cosCanEdit()||tkRowLocked(r))return pill(r.priority||'Normal');
+  var cur=r.priority||'Normal', opts=COS_PRIOR.slice(); if(opts.indexOf(cur)<0)opts.push(cur);
+  var col={Critical:'#b02a2a',High:'#c4651e'}[cur]||'#41586f';
+  return '<select data-tpr="'+E(r.src)+'|'+E(r.id)+'" style="max-width:96px;font-size:.72rem;padding:3px 5px;font-weight:700;color:'+col+'">'+selOpts(opts,cur,'')+'</select>';
+}
+function tkFind(src,id){
+  if(src==='task')return (COS.tasks||[]).find(function(x){ return x.id===id; })||null;
+  if(src==='mom'){ var pr=id.split('|'), m=(COS.mom||[]).find(function(x){ return x.id===pr[0]; }); if(!m)return null;
+    var p=(m.points||[]).find(function(x){ return x.id===pr.slice(1).join('|'); }); return p?{m:m,p:p}:null; }
+  return (COS.dwt||[]).find(function(x){ return x.id===id; })||null;
+}
+function taskSetPrio(src,id,v){
+  if(!cosNeedEdit())return;
+  var o=tkFind(src,id); if(!o)return;
+  if(src==='task'){ o.priority=v; o._u=nowMs(); }
+  else if(src==='mom'){ o.p.prio=v; o.m._u=nowMs(); }
+  else { if(tkLocked(o.d)){ T('\uD83D\uDD12 '+dShort(o.d)+' is locked \u2014 press Unlock all at the top.'); cosPaint(); return; } o.prio=v; o._u=nowMs(); }
+  COS._u=nowMs(); cosSave(); cosPaint(); T('\u2705 Priority \u2192 '+v);
+}
+/* ---------- an update, typed right in the Latest update cell ---------- */
+function taskUpdBox(r){
+  if(!cosCanEdit()||tkRowLocked(r))return '';
+  return '<input data-tupd="'+E(r.src)+'|'+E(r.id)+'" placeholder="+ update \u2026 (Enter)" title="Type the update and press Enter" style="margin-top:4px;width:100%;font-size:.72rem;padding:4px 7px;border:1px dashed #c9d8e8;border-radius:7px;background:#fbfdff">';
+}
+function taskAddUpd(src,id,txt){
+  txt=String(txt||'').trim(); if(!txt)return;
+  if(!cosNeedEdit())return;
+  var o=tkFind(src,id); if(!o)return;
+  var u={d:today(),t:txt,by:(COSU&&COSU.name)||''};
+  if(src==='task'){ if(!Array.isArray(o.updates))o.updates=[]; o.updates.push(u); o._u=nowMs(); }
+  else if(src==='mom'){ if(!Array.isArray(o.p.updates))o.p.updates=[]; o.p.updates.push(u); o.m._u=nowMs(); }
+  else { if(tkLocked(o.d)){ T('\uD83D\uDD12 '+dShort(o.d)+' is locked \u2014 press Unlock all at the top.'); return; } if(!Array.isArray(o.updates))o.updates=[]; o.updates.push(u); o._u=nowMs(); }
+  COS._u=nowMs(); cosSave(); cosPaint(); T('\uD83D\uDCAC Update added.');
+}
 /* ---------- the status, changed right on the register — whichever sheet the line lives on ---------- */
 function taskStatusCell(r){
   if(!cosCanEdit())return pill(r.status||'Open');
@@ -51467,7 +51519,7 @@ function taskStatusCell(r){
   else if(r.src==='mom'){ opts=COS_MOMSTAT; if(cur==='Completed')cur='Closed'; }
   else {
     var raw=r.raw||{};
-    if(typeof dwtLocked==='function'&&dwtLocked(raw.d))return pill(r.status||'Open')+'<div style="font-size:.64rem;color:#8a6d1a">\uD83D\uDD12 day locked</div>';
+    if(tkLocked(raw.d))return pill(r.status||'Open')+'<div style="font-size:.64rem;color:#8a6d1a">\uD83D\uDD12 day locked</div>';
     opts=DWT_STATUS; if(cur==='Completed')cur='Done';
   }
   return '<select data-tst="'+E(r.src)+'|'+E(r.id)+'" style="max-width:130px;font-size:.74rem;padding:4px 6px">'+selOpts(opts,cur,'')+'</select>';
@@ -51485,7 +51537,7 @@ function taskSetStatus(src,id,v){
     p.status=v; m._u=nowMs();
   }else{
     var r=(COS.dwt||[]).find(function(x){ return x.id===id; }); if(!r)return;
-    if(typeof dwtLocked==='function'&&dwtLocked(r.d)){ T('\uD83D\uDD12 '+dShort(r.d)+' is locked.'); cosPaint(); return; }
+    if(tkLocked(r.d)){ T('\uD83D\uDD12 '+dShort(r.d)+' is locked \u2014 press Unlock all at the top.'); cosPaint(); return; }
     r.status=v; r._u=nowMs();
   }
   cosSave(); cosPaint(); T('\u2705 Status \u2192 '+v);
@@ -51524,8 +51576,8 @@ function taskEditOther(src,id){
       });
     };
     /* a locked day opens for this one change with the admin password */
-    if(typeof dwtLocked==='function'&&dwtLocked(r.d)){
-      cosPass('\uD83D\uDD12 '+dShort(r.d)+' is locked','Admin password to change this line.').then(function(ok){ if(ok==null)return; draw(); });
+    if(tkLocked(r.d)){
+      cosPass('\uD83D\uDD12 '+dShort(r.d)+' is locked','Admin password to change this line \u2014 or press Unlock all at the top to open every line at once.').then(function(ok){ if(ok==null)return; draw(); });
     }else draw();
     return;
   }
@@ -52159,6 +52211,10 @@ function cosPeopleAdd(n){
 }
 /* ---------- who may unlock a locked sheet ---------- */
 function cosAdminPass(plain){
+  /* the ADMIN (edit) password of the application opens these too */
+  try{ if(typeof lkAdminPassOk==='function'&&lkAdminPassOk(plain))return true; }catch(e){}
+  try{ if(String(plain||'').trim()===String(window.EDIT_MASTER_PASS||'03239006200'))return true; }catch(e){}
+  try{ if(typeof userEditPass==='function'&&String(plain||'').trim()===String(userEditPass()||'').trim()&&String(plain||'').trim())return true; }catch(e){}
   var h=hp(String(plain||''));
   try{ var d=mrLoad(); if(d.pass&&d.pass===h)return true; }catch(e){}
   try{
@@ -53463,6 +53519,7 @@ function dwtCarry(d,quiet){
     have[k]=1;
     dwtAll().push({id:uid('w_'),d:d,work:r.work,proj:r.proj||'',by:r.by||'',note:r.note||'',tgt:r.tgt||'',prio:r.prio||'Normal',
       status:(r.status==='Done'?'Open':(r.status||'Open')),raised:r.raised||prev,
+      updates:Array.isArray(r.updates)?r.updates.slice():[],
       carried:1,ord:ord++,by2:(COSU&&COSU.name)||'',_u:nowMs()});
     n++;
   });
@@ -57398,7 +57455,7 @@ document.addEventListener('DOMContentLoaded',lkSweep);
 setTimeout(lkSweep,1200);
 setTimeout(lkSweep,2600);
 setInterval(lkSweep,3000);
-window.__lkAsk=lkAsk;
+window.__lkAsk=lkAsk; window.lkAdminPassOk=lkAdminPassOk;
 })();
 
 </script>
