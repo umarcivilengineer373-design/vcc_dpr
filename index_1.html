@@ -1566,6 +1566,12 @@ function printNow(){
     <span class="lg-walk lg-w2"><s></s><b></b></span>
     <span class="lg-rain"></span><span class="lg-rain b"></span><span class="lg-rain c"></span>
   </div>
+  <style>
+    .login-box.pickwide{max-width:1740px;width:calc(100vw - 56px)}
+    .login-box.pickwide .lg-grid{grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+    @media(min-width:1500px){.login-box.pickwide .lg-grid{grid-template-columns:repeat(4,1fr)}}
+    @media(min-width:1500px){.login-box.pickwide .lg-proj{padding:22px 18px}.login-box.pickwide .lg-proj img{height:66px;max-width:260px}}
+  </style>
   <div class="login-box pickwide" bis_skin_checked="1">
     <!-- STEP 1 — which project -->
     <div id="lgPick" style="" bis_skin_checked="1">
