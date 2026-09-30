@@ -3326,8 +3326,6 @@ input.bd-drop{appearance:none;-webkit-appearance:none;cursor:text;padding-right:
       <button class="ghost" id="bdCsv" style="padding:6px 12px;font-size:.78rem">⬇ CSV</button>
       <button class="ghost" id="bdPrint" style="padding:6px 12px;font-size:.78rem">🖨 Print</button>
       <button class="ghost" id="bdMaster" style="padding:6px 12px;font-size:.78rem">⚙ Master</button>
-      <button class="ghost" id="bdDup" style="padding:6px 12px;font-size:.78rem" title="Find bills that appear more than once and keep one of each">🧹 Duplicates</button>
-      <button class="ghost" id="bdCloud" style="padding:6px 12px;font-size:.78rem;color:#157A5E;border-color:#bcd8c8" title="Send the whole diary to the database now">☁ Save to server</button>
       <span class="pill total" id="bdPill">559</span>
       <span class="lk-bar noprint" style="display:inline-flex;align-items:center;gap:8px;margin-left:8px">
         <button type="button" class="ghost" id="bdLock" style="padding:5px 12px;font-size:.78rem;font-weight:700">🔒 Save &amp; Lock</button>
@@ -3651,50 +3649,6 @@ input.bd-drop{appearance:none;-webkit-appearance:none;cursor:text;padding-right:
   function today(){ return new Date().toISOString().slice(0,10); }
   function ro(){ try{ return typeof isReadOnly==='function'&&isReadOnly(); }catch(e){ return false; } }
   function newId(){ return 'b'+Date.now().toString(36)+Math.floor(Math.random()*99999).toString(36); }
-  /* what makes two lines the SAME bill: date, bill no, contractor, project, IPC and the money */
-  function ckey(r){ var t=function(v){ return String(v==null?'':v).trim().toLowerCase().replace(/\s+/g,' '); };
-    return [t(r.date),t(r.billNo),t(r.contractor),t(r.project),t(r.ipc),Math.round(num(r.gross)*100),Math.round(num(r.net)*100),Math.round(num(r.ded)*100)].join('|'); }
-  /* keep one of every identical bill — the one with the smallest id, so every computer keeps the same one — and
-     tombstone the rest, so the copy in the database and on the other computers drops them too */
-  function dedupe(){
-    var by={}, drop=[];
-    DB.rows.slice().sort(function(a,b){ return String(a.id)<String(b.id)?-1:1; }).forEach(function(r){ var k=ckey(r); if(by[k])drop.push(r.id); else by[k]=r; });
-    if(!drop.length)return 0;
-    drop.forEach(function(id){ if(DB.del.indexOf(id)<0)DB.del.push(id); });
-    DB.rows=DB.rows.filter(function(r){ return drop.indexOf(r.id)<0; });
-    return drop.length;
-  }
-  /* two different bills with the same number (two computers opened "New Bill" at the same moment): the one entered later
-     moves to the next free number — the same way on every computer, so all of them end up with one register */
-  function billNoParts(v){ var m=String(v||'').trim().match(/^([A-Za-z\-\/]*)(\d+)$/); return m?{pre:m[1]||'',n:+m[2]}:null; }
-  function fixBillNos(){
-    var used={}, changed=0, maxN=0, pre='B-';
-    DB.rows.forEach(function(r){ var p=billNoParts(r.billNo); if(p&&p.n>maxN){ maxN=p.n; pre=p.pre; } });
-    DB.rows.slice().sort(function(a,b){ return String(a.id)<String(b.id)?-1:1; }).forEach(function(r){
-      var k=String(r.billNo||'').trim().toLowerCase(); if(!k)return;
-      if(!used[k]){ used[k]=r; return; }
-      var p=billNoParts(r.billNo)||{pre:pre,n:maxN}; var n=maxN+1; while(used[(p.pre+n).toLowerCase()])n++;
-      var old=r.billNo; r.billNo=p.pre+n; maxN=n; used[r.billNo.toLowerCase()]=r; changed++;
-      r.remarks=String(r.remarks||'')+(r.remarks?' \u00b7 ':'')+'was '+old+' (number already used)';
-    });
-    return changed;
-  }
-  window.__bdFixNos=fixBillNos;
-  function dupInfo(){ var by={}, groups=[]; DB.rows.forEach(function(r){ var k=ckey(r); (by[k]=by[k]||[]).push(r); }); Object.keys(by).forEach(function(k){ if(by[k].length>1)groups.push(by[k]); }); return groups; }
-  window.__bdDupCheck=async function(){
-    fresh(); var fixed=0; try{ fixed=fixBillNos(); }catch(e){} if(fixed){ save(); render(); try{ toast('\uD83D\uDD22 '+fixed+' bill(s) had a number already used by another bill \u2014 moved to the next free number (noted in Remarks).'); }catch(e){} }
-    var g=dupInfo(); if(!g.length){ try{ toast('\u2705 No duplicate bill in the diary \u2014 '+DB.rows.length+' bills, every one different.'); }catch(e){} return 0; }
-    var extra=0; g.forEach(function(x){ extra+=x.length-1; });
-    var sample=g.slice(0,6).map(function(x){ var r=x[0]; return (r.billNo||'(no bill no)')+' \u00b7 '+(r.contractor||'')+' \u00b7 '+(r.date||'')+' \u00d7'+x.length; }).join('\n');
-    var ok=true; try{ if(typeof uiConfirm==='function')ok=await uiConfirm(g.length+' bill(s) appear more than once ('+extra+' extra line(s)):\n\n'+sample+(g.length>6?'\n\u2026':'')+'\n\nRemove the extra copies? One of each stays.','Remove duplicates'); }catch(e){}
-    if(!ok)return 0; var n=dedupe(); save(); render(); try{ toast('\uD83E\uDDF9 '+n+' duplicate line(s) removed \u2014 '+DB.rows.length+' bills remain, sent to the database.'); }catch(e){} return n;
-  };
-  window.__bdServerSave=async function(){
-    fresh(); if(!(typeof cloudOn==='function'&&cloudOn())){ try{ toast('\u26A0 Not connected to the database.'); }catch(e){} return; }
-    try{ toast('\u2601 Sending '+DB.rows.length+' bills to the database \u2026'); }catch(e){}
-    try{ await supaPush('bdiary',[{item_id:'all',data:DB}]); try{ localStorage.setItem(KEY+'_pushed',String(Date.now())); }catch(e){} try{ toast('\u2705 Bill Diary saved to the database \u2014 '+DB.rows.length+' bills, '+DB.del.length+' deletions remembered.'); }catch(e){} }
-    catch(e){ try{ toast('\u26A0 The database did not answer \u2014 try again when online.'); }catch(x){} }
-  };
   /* a date in any of the shapes his sheets use */
   function isoDate(v){
     if(v==null)return '';
@@ -3734,7 +3688,7 @@ input.bd-drop{appearance:none;-webkit-appearance:none;cursor:text;padding-right:
   function norm(o){
     if(!o||typeof o!=='object')o={};
     var d={stamp:String(o.stamp||''),rows:[],contractors:[],projects:[],scopes:[],
-           del:(Array.isArray(o.del)?o.del:[]).filter(function(x){ return typeof x==='string'; }).slice(-5000)};
+           del:(Array.isArray(o.del)?o.del:[]).filter(function(x){ return typeof x==='string'; }).slice(-800)};
     (Array.isArray(o.rows)?o.rows:[]).forEach(function(r,i){ if(r&&typeof r==='object')d.rows.push(normRow(r,i+1)); });
     (Array.isArray(o.contractors)?o.contractors:[]).forEach(function(c){
       if(!c)return;
@@ -4160,7 +4114,7 @@ input.bd-drop{appearance:none;-webkit-appearance:none;cursor:text;padding-right:
     ['bdfGross','bdfSec','bdfMob','bdfDed'].forEach(function(i){ g(i).addEventListener('input',recalc); });
     g('bdfNet').addEventListener('input',function(){ this._touched=true; });
     ov.querySelector('#bdEdCancel').onclick=function(){ ov.remove(); };
-    ov.querySelector('#bdEdSave').onclick=async function(){
+    ov.querySelector('#bdEdSave').onclick=function(){
       try{ if(typeof roBlock==='function'&&roBlock())return; }catch(e){}
       var o={id:r.id||newId(),
         date:isoDate(g('bdfDate').value), billNo:(r.billNo||g('bdfBill').value||'').trim(),
@@ -4175,15 +4129,8 @@ input.bd-drop{appearance:none;-webkit-appearance:none;cursor:text;padding-right:
       if(!o.net)o.net=o.gross-o.sec-o.mob-o.ded;
       if(!o.contractor&&!o.gross){ try{ toast('Pick a contractor, or write the bill amount.'); }catch(e){} return; }
       var was=byId(o.id);
-      var twin=null; try{ var kk=ckey(o); twin=DB.rows.filter(function(x){ return x.id!==o.id&&ckey(x)===kk; })[0]; }catch(e){}
-      if(twin){ var go=false; try{ go=(typeof uiConfirm==='function')?await uiConfirm('This bill is already in the diary ('+(twin.billNo||'no bill no')+' \u00b7 '+(twin.contractor||'')+' \u00b7 '+(twin.date||'')+'). Add it a second time anyway?','Add anyway'):confirm('This bill is already in the diary. Add it again?'); }catch(e){} if(!go)return; }
       if(was)Object.keys(o).forEach(function(k){ was[k]=o[k]; });
-      else {
-        /* the number shown when the form opened may have been taken meanwhile — take the next free one now */
-        var taken=function(v){ v=String(v||'').toLowerCase(); return DB.rows.some(function(x){ return String(x.billNo||'').toLowerCase()===v; }); };
-        if(o.billNo&&taken(o.billNo)){ var nb=nextBillNo(); while(nb&&taken(nb)){ var pp=billNoParts(nb); nb=pp?(pp.pre+(pp.n+1)):''; } if(nb){ try{ toast('Bill number '+o.billNo+' was just used \u2014 this bill is '+nb+'.'); }catch(e){} o.billNo=nb; } }
-        DB.rows.push(normRow(o,DB.rows.length+1));
-      }
+      else DB.rows.push(normRow(o,DB.rows.length+1));
       remember(o);
       save(); render(); ov.remove();
       try{ toast(was?'Bill saved':'Bill added'); }catch(e){}
@@ -4377,8 +4324,6 @@ input.bd-drop{appearance:none;-webkit-appearance:none;cursor:text;padding-right:
     if(_wired)return; _wired=true;
     var b=function(id,fn){ var el=$(id); if(el)el.addEventListener('click',fn); };
     b('#bdNew',function(){ openForm(null); });
-    b('#bdDup',function(){ window.__bdDupCheck(); });
-    b('#bdCloud',function(){ window.__bdServerSave(); });
     b('#bdCsv',csv);
     b('#bdPrint',function(){ head(); try{ printNow(); }catch(e){ window.print(); } });
     b('#bdImport',function(){ if(window.__bdImport)window.__bdImport(); });
@@ -4455,8 +4400,6 @@ input.bd-drop{appearance:none;-webkit-appearance:none;cursor:text;padding-right:
       seen[r.id]=1; DB.rows.push(r);
     });
     DB.rows=DB.rows.filter(function(r){ return DB.del.indexOf(r.id)<0; });
-    var nd=0; try{ nd=dedupe(); }catch(e){} try{ nd+=fixBillNos(); }catch(e){}
-    if(nd){ console.info('bill diary: '+nd+' duplicate line(s) dropped on merge'); try{ if(typeof cloudSaveModule==='function')cloudSaveModule('bdiary',DB); }catch(e){} }
     var uni=function(a,b){ b.forEach(function(v){
       if(!a.some(function(x){ return String(x).toLowerCase()===String(v).toLowerCase(); }))a.push(v); }); };
     uni(DB.projects,inc.projects); uni(DB.scopes,inc.scopes);
@@ -4471,15 +4414,12 @@ input.bd-drop{appearance:none;-webkit-appearance:none;cursor:text;padding-right:
   window.__bdApplyImport=function(rows,mode){
     fresh();
     if(mode==='replace'){ DB.rows.forEach(function(r){ DB.del.push(r.id); }); DB.rows=[]; }
-    var have={}; DB.rows.forEach(function(r){ have[ckey(r)]=1; }); var skipped=0;
     rows.forEach(function(r){
       var o=normRow(r,DB.rows.length+1); o.id=newId(); o.lk=0;
-      var k=ckey(o); if(have[k]){ skipped++; return; } have[k]=1;
       DB.rows.push(o); remember(o);
     });
-    if(DB.del.length>5000)DB.del=DB.del.slice(-5000);
+    if(DB.del.length>800)DB.del=DB.del.slice(-800);
     save(); render();
-    if(skipped){ try{ toast(skipped+' line(s) were already in the diary and were not added again.'); }catch(e){} }
   };
   window.__bdPicker=function(inp,src,opts){ return pickerAttach(inp,src,opts); };
   window.__bdLists=function(which){ return (which==='contractor')?conNames():listOf(which); };
