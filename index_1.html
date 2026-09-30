@@ -3326,6 +3326,8 @@ input.bd-drop{appearance:none;-webkit-appearance:none;cursor:text;padding-right:
       <button class="ghost" id="bdCsv" style="padding:6px 12px;font-size:.78rem">⬇ CSV</button>
       <button class="ghost" id="bdPrint" style="padding:6px 12px;font-size:.78rem">🖨 Print</button>
       <button class="ghost" id="bdMaster" style="padding:6px 12px;font-size:.78rem">⚙ Master</button>
+      <button class="ghost" id="bdDup" style="padding:6px 12px;font-size:.78rem" title="Find bills that appear more than once and keep one of each">🧹 Duplicates</button>
+      <button class="ghost" id="bdCloud" style="padding:6px 12px;font-size:.78rem;color:#157A5E;border-color:#bcd8c8" title="Send the whole diary to the database now">☁ Save to server</button>
       <span class="pill total" id="bdPill">559</span>
       <span class="lk-bar noprint" style="display:inline-flex;align-items:center;gap:8px;margin-left:8px">
         <button type="button" class="ghost" id="bdLock" style="padding:5px 12px;font-size:.78rem;font-weight:700">🔒 Save &amp; Lock</button>
@@ -3649,6 +3651,50 @@ input.bd-drop{appearance:none;-webkit-appearance:none;cursor:text;padding-right:
   function today(){ return new Date().toISOString().slice(0,10); }
   function ro(){ try{ return typeof isReadOnly==='function'&&isReadOnly(); }catch(e){ return false; } }
   function newId(){ return 'b'+Date.now().toString(36)+Math.floor(Math.random()*99999).toString(36); }
+  /* what makes two lines the SAME bill: date, bill no, contractor, project, IPC and the money */
+  function ckey(r){ var t=function(v){ return String(v==null?'':v).trim().toLowerCase().replace(/\s+/g,' '); };
+    return [t(r.date),t(r.billNo),t(r.contractor),t(r.project),t(r.ipc),Math.round(num(r.gross)*100),Math.round(num(r.net)*100),Math.round(num(r.ded)*100)].join('|'); }
+  /* keep one of every identical bill — the one with the smallest id, so every computer keeps the same one — and
+     tombstone the rest, so the copy in the database and on the other computers drops them too */
+  function dedupe(){
+    var by={}, drop=[];
+    DB.rows.slice().sort(function(a,b){ return String(a.id)<String(b.id)?-1:1; }).forEach(function(r){ var k=ckey(r); if(by[k])drop.push(r.id); else by[k]=r; });
+    if(!drop.length)return 0;
+    drop.forEach(function(id){ if(DB.del.indexOf(id)<0)DB.del.push(id); });
+    DB.rows=DB.rows.filter(function(r){ return drop.indexOf(r.id)<0; });
+    return drop.length;
+  }
+  /* two different bills with the same number (two computers opened "New Bill" at the same moment): the one entered later
+     moves to the next free number — the same way on every computer, so all of them end up with one register */
+  function billNoParts(v){ var m=String(v||'').trim().match(/^([A-Za-z\-\/]*)(\d+)$/); return m?{pre:m[1]||'',n:+m[2]}:null; }
+  function fixBillNos(){
+    var used={}, changed=0, maxN=0, pre='B-';
+    DB.rows.forEach(function(r){ var p=billNoParts(r.billNo); if(p&&p.n>maxN){ maxN=p.n; pre=p.pre; } });
+    DB.rows.slice().sort(function(a,b){ return String(a.id)<String(b.id)?-1:1; }).forEach(function(r){
+      var k=String(r.billNo||'').trim().toLowerCase(); if(!k)return;
+      if(!used[k]){ used[k]=r; return; }
+      var p=billNoParts(r.billNo)||{pre:pre,n:maxN}; var n=maxN+1; while(used[(p.pre+n).toLowerCase()])n++;
+      var old=r.billNo; r.billNo=p.pre+n; maxN=n; used[r.billNo.toLowerCase()]=r; changed++;
+      r.remarks=String(r.remarks||'')+(r.remarks?' \u00b7 ':'')+'was '+old+' (number already used)';
+    });
+    return changed;
+  }
+  window.__bdFixNos=fixBillNos;
+  function dupInfo(){ var by={}, groups=[]; DB.rows.forEach(function(r){ var k=ckey(r); (by[k]=by[k]||[]).push(r); }); Object.keys(by).forEach(function(k){ if(by[k].length>1)groups.push(by[k]); }); return groups; }
+  window.__bdDupCheck=async function(){
+    fresh(); var fixed=0; try{ fixed=fixBillNos(); }catch(e){} if(fixed){ save(); render(); try{ toast('\uD83D\uDD22 '+fixed+' bill(s) had a number already used by another bill \u2014 moved to the next free number (noted in Remarks).'); }catch(e){} }
+    var g=dupInfo(); if(!g.length){ try{ toast('\u2705 No duplicate bill in the diary \u2014 '+DB.rows.length+' bills, every one different.'); }catch(e){} return 0; }
+    var extra=0; g.forEach(function(x){ extra+=x.length-1; });
+    var sample=g.slice(0,6).map(function(x){ var r=x[0]; return (r.billNo||'(no bill no)')+' \u00b7 '+(r.contractor||'')+' \u00b7 '+(r.date||'')+' \u00d7'+x.length; }).join('\n');
+    var ok=true; try{ if(typeof uiConfirm==='function')ok=await uiConfirm(g.length+' bill(s) appear more than once ('+extra+' extra line(s)):\n\n'+sample+(g.length>6?'\n\u2026':'')+'\n\nRemove the extra copies? One of each stays.','Remove duplicates'); }catch(e){}
+    if(!ok)return 0; var n=dedupe(); save(); render(); try{ toast('\uD83E\uDDF9 '+n+' duplicate line(s) removed \u2014 '+DB.rows.length+' bills remain, sent to the database.'); }catch(e){} return n;
+  };
+  window.__bdServerSave=async function(){
+    fresh(); if(!(typeof cloudOn==='function'&&cloudOn())){ try{ toast('\u26A0 Not connected to the database.'); }catch(e){} return; }
+    try{ toast('\u2601 Sending '+DB.rows.length+' bills to the database \u2026'); }catch(e){}
+    try{ await supaPush('bdiary',[{item_id:'all',data:DB}]); try{ localStorage.setItem(KEY+'_pushed',String(Date.now())); }catch(e){} try{ toast('\u2705 Bill Diary saved to the database \u2014 '+DB.rows.length+' bills, '+DB.del.length+' deletions remembered.'); }catch(e){} }
+    catch(e){ try{ toast('\u26A0 The database did not answer \u2014 try again when online.'); }catch(x){} }
+  };
   /* a date in any of the shapes his sheets use */
   function isoDate(v){
     if(v==null)return '';
@@ -3688,7 +3734,7 @@ input.bd-drop{appearance:none;-webkit-appearance:none;cursor:text;padding-right:
   function norm(o){
     if(!o||typeof o!=='object')o={};
     var d={stamp:String(o.stamp||''),rows:[],contractors:[],projects:[],scopes:[],
-           del:(Array.isArray(o.del)?o.del:[]).filter(function(x){ return typeof x==='string'; }).slice(-800)};
+           del:(Array.isArray(o.del)?o.del:[]).filter(function(x){ return typeof x==='string'; }).slice(-5000)};
     (Array.isArray(o.rows)?o.rows:[]).forEach(function(r,i){ if(r&&typeof r==='object')d.rows.push(normRow(r,i+1)); });
     (Array.isArray(o.contractors)?o.contractors:[]).forEach(function(c){
       if(!c)return;
@@ -4114,7 +4160,7 @@ input.bd-drop{appearance:none;-webkit-appearance:none;cursor:text;padding-right:
     ['bdfGross','bdfSec','bdfMob','bdfDed'].forEach(function(i){ g(i).addEventListener('input',recalc); });
     g('bdfNet').addEventListener('input',function(){ this._touched=true; });
     ov.querySelector('#bdEdCancel').onclick=function(){ ov.remove(); };
-    ov.querySelector('#bdEdSave').onclick=function(){
+    ov.querySelector('#bdEdSave').onclick=async function(){
       try{ if(typeof roBlock==='function'&&roBlock())return; }catch(e){}
       var o={id:r.id||newId(),
         date:isoDate(g('bdfDate').value), billNo:(r.billNo||g('bdfBill').value||'').trim(),
@@ -4129,8 +4175,15 @@ input.bd-drop{appearance:none;-webkit-appearance:none;cursor:text;padding-right:
       if(!o.net)o.net=o.gross-o.sec-o.mob-o.ded;
       if(!o.contractor&&!o.gross){ try{ toast('Pick a contractor, or write the bill amount.'); }catch(e){} return; }
       var was=byId(o.id);
+      var twin=null; try{ var kk=ckey(o); twin=DB.rows.filter(function(x){ return x.id!==o.id&&ckey(x)===kk; })[0]; }catch(e){}
+      if(twin){ var go=false; try{ go=(typeof uiConfirm==='function')?await uiConfirm('This bill is already in the diary ('+(twin.billNo||'no bill no')+' \u00b7 '+(twin.contractor||'')+' \u00b7 '+(twin.date||'')+'). Add it a second time anyway?','Add anyway'):confirm('This bill is already in the diary. Add it again?'); }catch(e){} if(!go)return; }
       if(was)Object.keys(o).forEach(function(k){ was[k]=o[k]; });
-      else DB.rows.push(normRow(o,DB.rows.length+1));
+      else {
+        /* the number shown when the form opened may have been taken meanwhile — take the next free one now */
+        var taken=function(v){ v=String(v||'').toLowerCase(); return DB.rows.some(function(x){ return String(x.billNo||'').toLowerCase()===v; }); };
+        if(o.billNo&&taken(o.billNo)){ var nb=nextBillNo(); while(nb&&taken(nb)){ var pp=billNoParts(nb); nb=pp?(pp.pre+(pp.n+1)):''; } if(nb){ try{ toast('Bill number '+o.billNo+' was just used \u2014 this bill is '+nb+'.'); }catch(e){} o.billNo=nb; } }
+        DB.rows.push(normRow(o,DB.rows.length+1));
+      }
       remember(o);
       save(); render(); ov.remove();
       try{ toast(was?'Bill saved':'Bill added'); }catch(e){}
@@ -4324,6 +4377,8 @@ input.bd-drop{appearance:none;-webkit-appearance:none;cursor:text;padding-right:
     if(_wired)return; _wired=true;
     var b=function(id,fn){ var el=$(id); if(el)el.addEventListener('click',fn); };
     b('#bdNew',function(){ openForm(null); });
+    b('#bdDup',function(){ window.__bdDupCheck(); });
+    b('#bdCloud',function(){ window.__bdServerSave(); });
     b('#bdCsv',csv);
     b('#bdPrint',function(){ head(); try{ printNow(); }catch(e){ window.print(); } });
     b('#bdImport',function(){ if(window.__bdImport)window.__bdImport(); });
@@ -4400,6 +4455,8 @@ input.bd-drop{appearance:none;-webkit-appearance:none;cursor:text;padding-right:
       seen[r.id]=1; DB.rows.push(r);
     });
     DB.rows=DB.rows.filter(function(r){ return DB.del.indexOf(r.id)<0; });
+    var nd=0; try{ nd=dedupe(); }catch(e){} try{ nd+=fixBillNos(); }catch(e){}
+    if(nd){ console.info('bill diary: '+nd+' duplicate line(s) dropped on merge'); try{ if(typeof cloudSaveModule==='function')cloudSaveModule('bdiary',DB); }catch(e){} }
     var uni=function(a,b){ b.forEach(function(v){
       if(!a.some(function(x){ return String(x).toLowerCase()===String(v).toLowerCase(); }))a.push(v); }); };
     uni(DB.projects,inc.projects); uni(DB.scopes,inc.scopes);
@@ -4414,12 +4471,15 @@ input.bd-drop{appearance:none;-webkit-appearance:none;cursor:text;padding-right:
   window.__bdApplyImport=function(rows,mode){
     fresh();
     if(mode==='replace'){ DB.rows.forEach(function(r){ DB.del.push(r.id); }); DB.rows=[]; }
+    var have={}; DB.rows.forEach(function(r){ have[ckey(r)]=1; }); var skipped=0;
     rows.forEach(function(r){
       var o=normRow(r,DB.rows.length+1); o.id=newId(); o.lk=0;
+      var k=ckey(o); if(have[k]){ skipped++; return; } have[k]=1;
       DB.rows.push(o); remember(o);
     });
-    if(DB.del.length>800)DB.del=DB.del.slice(-800);
+    if(DB.del.length>5000)DB.del=DB.del.slice(-5000);
     save(); render();
+    if(skipped){ try{ toast(skipped+' line(s) were already in the diary and were not added again.'); }catch(e){} }
   };
   window.__bdPicker=function(inp,src,opts){ return pickerAttach(inp,src,opts); };
   window.__bdLists=function(which){ return (which==='contractor')?conNames():listOf(which); };
@@ -7408,7 +7468,7 @@ input.bd-drop{appearance:none;-webkit-appearance:none;cursor:text;padding-right:
   </div>
 
   <div class="card admin-only" id="siCard">
-    <div class="card-h"><h2>Procurement &amp; Store imports</h2><span class="hint">one ERP file per register &mdash; only the rows whose <b>Sub Segment Name</b> (column C) equals this project&rsquo;s name are taken; a line already here is never taken twice</span></div>
+    <div class="card-h"><h2>Procurement &amp; Store &mdash; locks</h2><span class="hint">the ERP files (PR / PO / IGP / GRN / Store Issuance) are imported once for every project from &#9881; Master Settings &#9656; &#128230; ERP files &mdash; this card only locks the two sheets and shows what is on record</span></div>
     <div class="card-b">
       <div id="siProjNote" style="font-size:.8rem;color:var(--muted);margin-bottom:10px"></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -7423,7 +7483,7 @@ input.bd-drop{appearance:none;-webkit-appearance:none;cursor:text;padding-right:
       <div id="siLocks" style="margin-top:12px"></div>
       <input type="file" id="siFile" accept=".xlsx,.xls,.csv" style="display:none">
       <style>
-        .lk-bar[data-lk="proc"],.lk-bar[data-lk="storeout"],#tab-proc .lk-veil .lk-unlock,#tab-storeout .lk-veil .lk-unlock,#soImport,#soImpFile,#soAdd{display:none!important}
+        .lk-bar[data-lk="proc"],.lk-bar[data-lk="storeout"],#tab-proc .lk-veil .lk-unlock,#tab-storeout .lk-veil .lk-unlock,#soImport,#soImpFile,#soAdd,#siCard [data-simp],#siCard #siProjNote{display:none!important}
         .si-lk{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 12px;border:1px solid var(--border);border-radius:9px;margin-top:6px;background:#fafbfc}
         .si-lk b{min-width:150px}
         .si-lk .si-note{font-size:.74rem;color:var(--muted);flex:1;min-width:160px}
@@ -38486,12 +38546,14 @@ var XW_STYLES='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
  '<font><b/><sz val="11"/><name val="Calibri"/><color rgb="FF1F3247"/></font>'+
  '<font><sz val="10"/><name val="Calibri"/><color rgb="FF4A5A6A"/></font>'+
 '</fonts>'+
-'<fills count="5">'+
+'<fills count="7">'+
  '<fill><patternFill patternType="none"/></fill>'+
  '<fill><patternFill patternType="gray125"/></fill>'+
  '<fill><patternFill patternType="solid"><fgColor rgb="FF1F3247"/><bgColor indexed="64"/></patternFill></fill>'+
  '<fill><patternFill patternType="solid"><fgColor rgb="FFE8EDF3"/><bgColor indexed="64"/></patternFill></fill>'+
  '<fill><patternFill patternType="solid"><fgColor rgb="FFF4F7FA"/><bgColor indexed="64"/></patternFill></fill>'+
+ '<fill><patternFill patternType="solid"><fgColor rgb="FFFFF6D5"/><bgColor indexed="64"/></patternFill></fill>'+
+ '<fill><patternFill patternType="solid"><fgColor rgb="FFEAF3FB"/><bgColor indexed="64"/></patternFill></fill>'+
 '</fills>'+
 '<borders count="2">'+
  '<border><left/><right/><top/><bottom/><diagonal/></border>'+
@@ -38499,7 +38561,7 @@ var XW_STYLES='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
   '<top style="thin"><color rgb="FFB8C2CD"/></top><bottom style="thin"><color rgb="FFB8C2CD"/></bottom><diagonal/></border>'+
 '</borders>'+
 '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'+
-'<cellXfs count="18">'+
+'<cellXfs count="24">'+
  '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'+
  '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment vertical="center"/></xf>'+
  '<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>'+
@@ -38519,6 +38581,12 @@ var XW_STYLES='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
  '<xf numFmtId="0" fontId="5" fillId="0" borderId="0" xfId="0" applyFont="1"/>'+
  '<xf numFmtId="0" fontId="4" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>'+
  '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>'+
+ '<xf numFmtId="164" fontId="0" fillId="5" borderId="1" xfId="0" applyNumberFormat="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>'+
+ '<xf numFmtId="165" fontId="0" fillId="5" borderId="1" xfId="0" applyNumberFormat="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>'+
+ '<xf numFmtId="0" fontId="0" fillId="6" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>'+
+ '<xf numFmtId="0" fontId="6" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>'+
+ '<xf numFmtId="164" fontId="6" fillId="4" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>'+
+ '<xf numFmtId="167" fontId="6" fillId="4" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>'+
 '</cellXfs>'+
 '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'+
 '</styleSheet>';
@@ -38547,6 +38615,8 @@ function xwSheetXml(sh){
         var ser=xwSerial(c.v);
         if(ser==null)continue;
         cells+='<c r="'+ref+'" s="'+st+'"><v>'+ser+'</v></c>';
+      }else if(c.t==='f'){
+        cells+='<c r="'+ref+'" s="'+st+'"><f>'+xwEsc(String(c.f||''))+'</f></c>';
       }else{
         var tx=String(c.v==null?'':c.v);
         if(!tx){ cells+='<c r="'+ref+'" s="'+st+'"/>'; continue; }
@@ -38569,20 +38639,29 @@ function xwSheetXml(sh){
     for(i=0;i<sh.merges.length;i++)merges+='<mergeCell ref="'+sh.merges[i]+'"/>';
     merges+='</mergeCells>';
   }
+  var dvs='';
+  if(sh.dv&&sh.dv.length){
+    dvs='<dataValidations count="'+sh.dv.length+'">';
+    for(i=0;i<sh.dv.length;i++){ var d=sh.dv[i];
+      dvs+='<dataValidation type="'+(d.type||'list')+'"'+(d.op?(' operator="'+d.op+'"'):'')+' allowBlank="1" showInputMessage="1" showErrorMessage="1" errorStyle="'+(d.style||'stop')+'"'+
+        (d.title?(' errorTitle="'+xwEsc(d.title)+'"'):'')+(d.error?(' error="'+xwEsc(d.error)+'"'):'')+(d.prompt?(' promptTitle="'+xwEsc(d.pTitle||'')+'" prompt="'+xwEsc(d.prompt)+'"'):'')+' sqref="'+d.sqref+'">'+
+        '<formula1>'+xwEsc(String(d.f1||''))+'</formula1>'+(d.f2!=null?('<formula2>'+xwEsc(String(d.f2))+'</formula2>'):'')+'</dataValidation>'; }
+    dvs+='</dataValidations>';
+  }
   var dim='A1:'+xwCol(maxC-1)+(rows.length||1);
   return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
     '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'+
     '<dimension ref="'+dim+'"/>'+
-    '<sheetViews><sheetView showGridLines="0"'+(sh.active?' tabSelected="1"':'')+' workbookViewId="0">'+pane+'</sheetView></sheetViews>'+
+    '<sheetViews><sheetView showGridLines="'+(sh.grid?'1':'0')+'"'+(sh.active?' tabSelected="1"':'')+' workbookViewId="0">'+pane+'</sheetView></sheetViews>'+
     '<sheetFormatPr defaultRowHeight="15"/>'+colXml+
-    '<sheetData>'+body+'</sheetData>'+filt+merges+
+    '<sheetData>'+body+'</sheetData>'+filt+merges+dvs+
     '<pageMargins left="0.3" right="0.3" top="0.5" bottom="0.5" header="0.3" footer="0.3"/>'+
     '<pageSetup orientation="landscape" fitToWidth="1" fitToHeight="0" paperSize="8"/>'+
     '</worksheet>';
 }
 function xwName(n){ return String(n||'Sheet').replace(/[\\\/\?\*\[\]:]/g,'-').slice(0,31); }
-function xlsxBuild(sheets,fileName){
-  var files=[], i;
+function xlsxBuild(sheets,fileName,opts){
+  var files=[], i; opts=opts||{};
   var ct='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
     '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'+
     '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'+
@@ -38607,7 +38686,13 @@ function xlsxBuild(sheets,fileName){
     used[k]=1;
     wb+='<sheet name="'+xwEsc(nm)+'" sheetId="'+(i+1)+'" r:id="rId'+(i+1)+'"/>';
   }
-  wb+='</sheets></workbook>';
+  wb+='</sheets>';
+  if(opts.names&&opts.names.length){
+    wb+='<definedNames>';
+    for(i=0;i<opts.names.length;i++)wb+='<definedName name="'+xwEsc(opts.names[i].name)+'">'+xwEsc(opts.names[i].ref)+'</definedName>';
+    wb+='</definedNames>';
+  }
+  wb+='<calcPr fullCalcOnLoad="1"/></workbook>';
   files.push({name:'xl/workbook.xml',xml:wb});
   var rel='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
     '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
@@ -40765,15 +40850,18 @@ function mrSheetList(){ return PERM_GROUPS.slice(); }
 function renderMasterSettings(){
   var d=mrLoad();
   var tabBtn=function(k,l){ return '<button data-mt="'+k+'" style="background:'+(mrTab===k?'var(--navy)':'#fff')+';color:'+(mrTab===k?'#fff':'var(--navy)')+';border:1px solid var(--border2);border-radius:8px;padding:6px 14px;font-size:.8rem;font-weight:700;cursor:pointer;margin-right:6px">'+l+'</button>'; };
-  var body='<div style="margin-bottom:12px">'+tabBtn('users','👤 Users &amp; Access')+tabBtn('projects','🏗️ Projects')+tabBtn('backup','💾 Backup')+tabBtn('pass','🔐 Passwords')+'</div><div id="mrBody"></div>';
+  var body='<div style="margin-bottom:12px">'+tabBtn('users','👤 Users &amp; Access')+tabBtn('projects','🏗️ Projects')+tabBtn('backup','💾 Backup')+tabBtn('erp','📦 ERP files')+tabBtn('pass','🔐 Passwords')+'</div><div id="mrBody"></div>';
   var ov=mrOverlay('mrSetOv','⚙ Master Settings',body,'',980);
   ov.querySelectorAll('[data-mt]').forEach(function(b){ b.onclick=function(){ mrTab=b.dataset.mt; renderMasterSettings(); }; });
   var box=ov.querySelector('#mrBody');
   if(mrTab==='projects')box.innerHTML=mrProjectsHTML(d);
   else if(mrTab==='pass')box.innerHTML=mrPassHTML();
   else if(mrTab==='backup')box.innerHTML=mrBackupHTML();
+  else if(mrTab==='erp')box.innerHTML=(window.mrErpHTML?window.mrErpHTML():'');
   else box.innerHTML=mrUsersHTML(d);
   mrWire(ov);
+  if(mrTab==='erp'){ try{ if(window.mrErpWire)window.mrErpWire(ov); }catch(e){}
+    try{ if(typeof mrLoadAllStates==='function')mrLoadAllStates().then(function(){ var b2=document.querySelector('#mrSetOv #mrBody'); if(b2&&mrTab==='erp'){ b2.innerHTML=window.mrErpHTML(); mrWire(document.getElementById('mrSetOv')); window.mrErpWire(document.getElementById('mrSetOv')); } }); }catch(e){} }
   if(mrTab==='backup'){
     /* the other projects' data lives in their own IndexedDB — read it, then redraw
        so the row counts are real rather than zero */
@@ -57105,9 +57193,10 @@ function pgExport(){
       xlsxSheet({ name:'Work Orders', title:'Work Orders / Contracts — '+proj, sub:'as the Work Order # drop-down lists them',
         head:['S.No','Work Order #','Sub Contractor / Vendor','Title of work order','Sub Segment','Value','Date'], align:['i','b','l','l','l','m','l'], rows:wos })
     ];
+    var names=[]; try{ names=pgEntryTemplate(sheets,n); }catch(e){ console.warn('entry template',e); names=[]; }
     var name='Progress-'+String(proj).replace(/[^A-Za-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,28)+'-'+first+'-to-'+last+'.xlsx';
-    var kb=Math.round(xlsxBuild(sheets,name)/1024);
-    T('⬇ '+n+' measurement line'+(n===1?'':'s')+' exported, '+span+' ('+kb+' KB) — 7 sheets. The Progress sheet imports straight back.');
+    var kb=Math.round(xlsxBuild(sheets,name,{names:names})/1024);
+    T('⬇ '+n+' measurement line'+(n===1?'':'s')+' exported, '+span+' ('+kb+' KB). The Progress sheet has 300 entry lines with drop-downs — fill Date + No/L/B/Ht and Import it back.');
   }catch(e){
     console.warn('progress export',e);
     /* no Excel writer here — a CSV carries the same columns */
@@ -57121,6 +57210,75 @@ function pgExport(){
     }
     T('⬇ Exported as CSV — '+n+' line'+(n===1?'':'s')+'.');
   }
+}
+
+/* ---------------- the Progress sheet as an entry form ----------------------------
+   Under the lines on record sit 300 empty lines. Only Date and No / Length / Breadth /
+   Height are typed (yellow). WBS Group, Sub Segment, Item, Floor, Vendor and Work Order
+   are drop-downs (blue) fed from the Lists tab — dependent, the way the form works:
+   pick the group, the sub segments of that group appear; pick the sub segment, its
+   items appear; the vendor's own work orders appear. BOQ ID, Unit, BOQ Qty, Qty,
+   Cumulative and % are formulas (grey). Import reads the BOQ ID, so it comes back
+   exactly on the right item.                                                       */
+function pgEntryTemplate(sheets,nLines){
+  var prog=sheets[0]; if(!prog||!prog.rows)return [];
+  var BLANK=300, HEAD=4, first=HEAD+1;                    /* header on row 4, data from row 5 */
+  /* ---- lists ---- */
+  var boq=(S.boq||[]).slice(), groups=[], G={};
+  boq.forEach(function(b){ var g=String(b.group||'').trim(), sb=String(b.sub||'').trim(), nm=String(b.name||'').trim(), fl=String(b.floor||'').trim();
+    if(!G[g]){ G[g]={subs:[],S:{},floors:[],F:{}}; groups.push(g); }
+    var gg=G[g]; if(!gg.S[sb]){ gg.S[sb]=[]; gg.subs.push(sb); } if(nm&&gg.S[sb].indexOf(nm)<0)gg.S[sb].push(nm);
+    if(fl&&!gg.F[fl]){ gg.F[fl]=1; gg.floors.push(fl); } });
+  var floorsAll=[]; groups.forEach(function(g){ G[g].floors.forEach(function(f){ if(floorsAll.indexOf(f)<0)floorsAll.push(f); }); });
+  var vendors=(typeof pgVendorList==='function')?pgVendorList():[];
+  var woAll=(typeof pgWoList==='function')?pgWoList(''):[];
+  var cols=[], names=[];                                 /* one column per list on the Lists tab */
+  var addList=function(name,label,vals){ var c=cols.length; cols.push({label:label,vals:vals.length?vals:['']}); var L=xwCol(c);
+    names.push({name:name,ref:"Lists!$"+L+"$2:$"+L+"$"+(1+Math.max(1,vals.length))}); };
+  addList('GroupList','WBS Group / BOQ Name',groups);
+  groups.forEach(function(g,i){ addList('S_'+(i+1),'Sub segments — '+g,G[g].subs);
+    G[g].subs.forEach(function(sb,j){ addList('I_'+(i+1)+'_'+(j+1),'Items — '+g+(sb?(' › '+sb):''),G[g].S[sb]); });
+    addList('F_'+(i+1),'Floors — '+g,G[g].floors); });
+  addList('FloorAll','Floors — all',floorsAll);
+  addList('VendorList','Sub Contractors / Vendors',vendors);
+  vendors.forEach(function(v,i){ addList('W_'+(i+1),'Work orders — '+v,(typeof pgWoList==='function'?pgWoList(v):[]).map(function(w){ return w.serial; })); });
+  addList('WOAll','Work orders — all',woAll.map(function(w){ return w.serial; }));
+  var lrows=[cols.map(function(c){ return {t:'s',v:c.label,s:3}; })], mx=0; cols.forEach(function(c){ if(c.vals.length>mx)mx=c.vals.length; });
+  for(var r=0;r<mx;r++)lrows.push(cols.map(function(c){ return c.vals[r]!=null?{t:'s',v:c.vals[r],s:17}:''; }));
+  sheets.push({name:'Lists',rows:lrows,cols:cols.map(function(c){ var w=String(c.label).length+2; c.vals.forEach(function(v){ if(String(v).length+2>w)w=String(v).length+2; }); return Math.max(10,Math.min(44,w)); }),freeze:1,rowH:{0:32}});
+  /* ---- the entry lines ---- */
+  var rows=prog.rows; if(rows.length>HEAD+nLines)rows.splice(HEAD+nLines);   /* drop the TOTAL row, blank lines come first */
+  var f=function(x){ return {t:'f',f:x,s:22}; }, fs=function(x){ return {t:'f',f:x,s:21}; }, fp=function(x){ return {t:'f',f:x,s:23}; };
+  for(var k=0;k<BLANK;k++){
+    var r=first+nLines+k;
+    rows.push([
+      fs('IF($F'+r+'="","",ROW()-'+HEAD+')'),
+      {t:'s',v:'',s:19}, /* Date — typed */
+      fs('IF(OR($D'+r+'="",$F'+r+'=""),"",IFERROR(INDEX(BOQ!$B:$B,MATCH(1,INDEX((BOQ!$C:$C=$D'+r+')*(BOQ!$D:$D=$E'+r+')*(BOQ!$E:$E=$F'+r+'),0),0)),""))'),
+      {t:'s',v:'',s:20},{t:'s',v:'',s:20},{t:'s',v:'',s:20},{t:'s',v:'',s:20},{t:'s',v:'',s:20},{t:'s',v:'',s:20},   /* group · sub · item · floor · vendor · WO — drop-downs */
+      fs('IF($C'+r+'="","",IFERROR(VLOOKUP($C'+r+',BOQ!$B:$J,6,FALSE),""))'),
+      f('IF($C'+r+'="","",IFERROR(VLOOKUP($C'+r+',BOQ!$B:$J,7,FALSE),""))'),
+      {t:'s',v:'',s:18},{t:'s',v:'',s:18},{t:'s',v:'',s:18},{t:'s',v:'',s:18},   /* No · L · B · Ht — typed */
+      f('IF(AND(L'+r+'="",M'+r+'="",N'+r+'="",O'+r+'=""),"",IF(AND(M'+r+'="",N'+r+'="",O'+r+'=""),N(L'+r+'),IF(L'+r+'="",1,L'+r+')*IF(M'+r+'="",1,M'+r+')*IF(N'+r+'="",1,N'+r+')*IF(O'+r+'="",1,O'+r+')))'),
+      f('IF($C'+r+'="","",SUMIF($C$'+first+':$C'+r+',$C'+r+',$P$'+first+':$P'+r+'))'),
+      fp('IF(OR($C'+r+'="",$K'+r+'="",$K'+r+'=0),"",$Q'+r+'/$K'+r+'*100)')
+    ]);
+  }
+  var lastR=first+nLines+BLANK-1;
+  rows.push(['','','','','',{t:'s',v:'TOTAL',s:8},'','','','','','','','','',{t:'f',f:'SUM($P$'+first+':$P$'+lastR+')',s:9},'','']);
+  prog.filter='A'+HEAD+':R'+lastR; prog.grid=1;
+  var rng=function(c){ return c+first+':'+c+lastR; };
+  prog.dv=[
+    {sqref:rng('B'),type:'date',op:'greaterThan',f1:'36526',title:'Date',error:'Type a real date, e.g. 30-Sep-2026.',pTitle:'Date',prompt:'The day the work was measured'},
+    {sqref:rng('D'),f1:'GroupList',title:'WBS Group / BOQ Name',error:'Pick from the list (Setup ▸ BOQ).',pTitle:'WBS Group',prompt:'Pick from the list'},
+    {sqref:rng('E'),f1:'IF($D'+first+'="",S_1,INDIRECT("S_"&MATCH($D'+first+',GroupList,0)))',title:'Sub Segment',error:'Pick from the list — the sub segments of the chosen WBS Group.',pTitle:'Sub Segment',prompt:'Pick the WBS Group first'},
+    {sqref:rng('F'),f1:'IF($D'+first+'="",I_1_1,IF($E'+first+'="",INDIRECT("I_"&MATCH($D'+first+',GroupList,0)&"_1"),INDIRECT("I_"&MATCH($D'+first+',GroupList,0)&"_"&MATCH($E'+first+',INDIRECT("S_"&MATCH($D'+first+',GroupList,0)),0))))',title:'Item Description',error:'Pick from the list — the items of the chosen WBS Group / Sub Segment.',pTitle:'Item',prompt:'Pick group and sub segment first'},
+    {sqref:rng('G'),f1:'IF($D'+first+'="",FloorAll,INDIRECT("F_"&MATCH($D'+first+',GroupList,0)))',title:'Floor',error:'Pick from the list.',pTitle:'Floor',prompt:'Floors of the chosen WBS Group'},
+    {sqref:rng('H'),f1:'VendorList',title:'Sub Contractor / Vendor',error:'Pick from the list (Work Orders sheet).',pTitle:'Vendor',prompt:'Pick from the list'},
+    {sqref:rng('I'),f1:'IF($H'+first+'="",WOAll,INDIRECT("W_"&MATCH($H'+first+',VendorList,0)))',title:'Work Order #',error:'Pick from the list — the work orders of the chosen vendor.',pTitle:'Work Order',prompt:'Pick the vendor first'},
+    {sqref:'L'+first+':O'+lastR,type:'decimal',op:'greaterThanOrEqual',f1:'0',title:'Number',error:'Numbers only.',pTitle:'Measurement',prompt:'No × Length × Breadth × Height — leave a box empty if it does not apply'}
+  ];
+  return names;
 }
 /* an empty sheet with the right headings, for someone starting from scratch */
 function pgFormat(){
@@ -60576,6 +60734,112 @@ function fixVeils(){
 setInterval(function(){ wire(); fixVeils(); if(E('tab-setup')&&E('tab-setup').classList.contains('on'))paint(); },1500);
 setTimeout(function(){ wire(); paint(); },2000);
 document.addEventListener('click',function(e){ if(e.target&&e.target.closest&&e.target.closest('[data-tab="setup"],[data-nav="setup"]'))setTimeout(paint,300); },true);
+})();
+
+</script>
+<script id="mimpMod">
+/* ==================================================================
+   MASTER SETTINGS ▸ ERP FILES — one PR / PO / IGP / GRN / Store
+   Issuance file for every project. The file is read once; each
+   project takes only the rows whose column C (Sub Segment Name /
+   Issued Sub Segment) carries that project's own name (Setup ▸ Project
+   Information ▸ Project Name), exactly like the old per-project import,
+   and the result is saved on this device and in each project's own
+   table in the database.
+   ================================================================== */
+(function(){
+function E(id){ return document.getElementById(id); }
+function X(s){ try{ return esc(s); }catch(e){ return String(s==null?'':s); } }
+var KINDS=[['prdr','PR / DR','Purchase Requests'],['po','PO','Purchase Orders'],['igp','IGP','Inward Gate Passes'],['grn','GRN','Goods Received Notes'],['issue','Store Issuance','Material Out (issued from the store)']];
+var LOG=[], BUSY=false, LAST=null;
+function erpName(p,st){ var n=''; try{ n=String((st&&st.settings&&st.settings.project)||'').trim(); }catch(e){} return n||String((p&&p.name)||'').trim(); }
+function counts(st){ var P=(st&&st.proc)||{}, so=((st&&st.store)||{}).out||[]; return {prdr:(P.prdr||[]).length,po:(P.po||[]).length,igp:(P.igp||[]).length,grn:(P.grn||[]).length,out:so.length,at:P.at||0}; }
+function fmtAt(t){ try{ return t?fmtShort(iso(new Date(t))):'—'; }catch(e){ return t?String(new Date(t)).slice(4,15):'—'; } }
+function html(){
+  var projs=[]; try{ projs=allProjects(); }catch(e){}
+  var h='<div class="card" style="margin:0 0 12px"><div class="card-h"><h2>📦 ERP files — one file for every project</h2><span class="hint">PR · PO · IGP · GRN · Store Issuance — upload once here; every project picks its own rows (column C = that project\'s Project Name)</span></div>'+
+    '<div class="card-b"><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'+
+    KINDS.map(function(k){ return '<button class="primary" data-merp="'+k[0]+'" style="padding:7px 14px;font-size:.8rem;background:#1d4670" title="'+X(k[2])+'">⬆ '+X(k[1])+'</button>'; }).join('')+
+    '<input type="file" id="merpFile" accept=".xlsx,.xls,.xlsm,.csv" style="display:none">'+
+    '<span class="hint" style="align-self:center">master password is asked once per file</span></div>'+
+    '<div id="merpNote" style="font-size:.78rem;color:#31465b;background:#f6f9fc;border:1px solid #d5dfea;border-radius:8px;padding:9px 12px;line-height:1.55;margin-bottom:10px">Rows are matched on <b>column C</b> — the ERP\'s Sub Segment Name must read exactly like each project\'s <b>Project Name</b> (Setup ▸ Project Information). A line already on record is never taken twice; rows of a name that matches no project are left out and listed below.</div>'+
+    '<div class="tw"><table class="grid" style="width:100%"><thead><tr><th>Project</th><th>ERP name (column C)</th><th style="text-align:right">PR</th><th style="text-align:right">PO</th><th style="text-align:right">IGP</th><th style="text-align:right">GRN</th><th style="text-align:right">Material Out</th><th>Last import</th></tr></thead><tbody id="merpRows">'+
+    projs.map(function(p){ var st=null; try{ st=mrProjectState(p); }catch(e){} var c=counts(st);
+      return '<tr><td><b>'+X(p.name)+'</b></td><td>'+X(erpName(p,st))+'</td><td style="text-align:right">'+c.prdr+'</td><td style="text-align:right">'+c.po+'</td><td style="text-align:right">'+c.igp+'</td><td style="text-align:right">'+c.grn+'</td><td style="text-align:right">'+c.out+'</td><td>'+X(fmtAt(c.at))+'</td></tr>'; }).join('')+
+    '</tbody></table></div>'+
+    (LAST?('<div id="merpLast" style="margin-top:10px;font-size:.78rem;line-height:1.6;background:#eef7f0;border:1px solid #bcd8c8;border-radius:8px;padding:9px 12px">'+LAST+'</div>'):'')+
+    '</div></div>';
+  return h;
+}
+function tableFor(p){ return String(p.id).toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'')||'vertical'; }
+async function pushOne(p,st,kind){
+  try{ if(!(typeof cloudOn==='function'&&cloudOn()))return false;
+    var tbl=tableFor(p)+'_records';
+    if(kind==='issue')await supaPush('st_store',[{item_id:'all',data:st.store||{}}],tbl);
+    else await supaPush('st_proc',[{item_id:'all',data:st.proc||{}}],tbl);
+    return true; }catch(e){ console.warn('master erp push',e); return false; }
+}
+async function run(kind,file){
+  if(BUSY)return; BUSY=true; LOG=[];
+  var keepToast=window.toast, keepPush=window.cloudPushExtras, keepReloc=window.procRelocateForeign;
+  var lines=[], unmatched={}, summary=[];
+  try{
+    try{ keepToast('Reading '+file.name+' …'); }catch(e){}
+    if(typeof mrLoadAllStates==='function'){ try{ await mrLoadAllStates(); }catch(e){} }
+    await loadXLSX();
+    var buf=await file.arrayBuffer();
+    var fake={name:file.name,arrayBuffer:function(){ return Promise.resolve(buf); }};
+    var projs=allProjects();
+    var issueRows=null;
+    if(kind==='issue'){ issueRows=await stReadIssueSheet(fake); if(!issueRows.length){ keepToast('No issue lines found in that sheet.'); return; } }
+    /* nothing is spoken or pushed by the old per-project code while the loop runs — we do it once at the end */
+    window.toast=function(m){ LOG.push(String(m)); };
+    window.cloudPushExtras=function(){ return Promise.resolve(); };
+    window.procRelocateForeign=function(){ return Promise.resolve(); };
+    for(var i=0;i<projs.length;i++){
+      var p=projs[i], st=null; try{ st=mrProjectState(p); }catch(e){}
+      if(!st){ summary.push({p:p,err:'no data on this device'}); continue; }
+      var name=erpName(p,st), before=counts(st);
+      var keepS=S, keepP=PROJ, ok=true, err='';
+      window.__pcStrictProj=name; window.__pcStrictSkipped=0; window.__pcStrictSeen={};
+      try{
+        S=st; PROJ=p;
+        if(kind==='issue'){
+          var pk=pcKey(name), mine=issueRows.filter(function(r){ return pcKey(String(r.issSub||r.reqSub||'').trim())===pk; });
+          issueRows.forEach(function(r){ var s=String(r.issSub||r.reqSub||'').trim()||'(blank)'; unmatched[s]=(unmatched[s]||0)+1; });
+          if(mine.length){ ST_IMP.mode='add'; ST_IMP.pick=[]; ST_IMP.rows=mine; var sp=stImpSplit(mine); var n=stImpApply(sp.fresh); if(n)save(true); lines.push(p.name+': '+n+' new issue line(s)'+(sp.dup.length?(', '+sp.dup.length+' already there'):'')); }
+        } else {
+          PC_REPLACE=0; await procImportFile(fake,false,kind);
+          Object.keys(window.__pcStrictSeen||{}).forEach(function(s){ unmatched[s]=(unmatched[s]||0)+1; });
+        }
+      }catch(e){ ok=false; err=String(e&&e.message||e); console.warn('master erp',p.name,e); }
+      finally{ S=keepS; PROJ=keepP; window.__pcStrictProj=''; }
+      var after=counts(st), d=(kind==='issue')?(after.out-before.out):(after[kind]-before[kind]);
+      var pushed=false; if(ok)pushed=await pushOne(p,st,kind);
+      summary.push({p:p,name:name,d:d,ok:ok,err:err,pushed:pushed,after:after});
+    }
+  }catch(e){ console.warn('master erp import',e); try{ keepToast('⚠ Could not read that file — please send the ERP Excel export.'); }catch(x){} }
+  finally{ window.toast=keepToast; window.cloudPushExtras=keepPush; window.procRelocateForeign=keepReloc; BUSY=false; }
+  /* names in the file that matched no project */
+  var known={}; summary.forEach(function(s){ if(s.name)known[pcKey(s.name)]=1; });
+  var left=Object.keys(unmatched).filter(function(s){ return !known[pcKey(s)]; });
+  var lab=(KINDS.filter(function(k){ return k[0]===kind; })[0]||[])[1]||kind;
+  var tot=0; summary.forEach(function(s){ if(s.ok&&s.d>0)tot+=s.d; });
+  LAST='<b>⬆ '+X(lab)+' — '+X(file.name)+'</b> · '+X(fmtAt(Date.now()))+'<br>'+
+    summary.map(function(s){ return (s.ok?(s.d>0?'✅ ':'▫ '):'⚠ ')+'<b>'+X(s.p.name)+'</b> ('+X(s.name||'')+'): '+(s.ok?((s.d>0?(s.d+' new line'+(s.d===1?'':'s')):'nothing new')+(s.pushed?' · saved to the database':(typeof cloudOn==='function'&&cloudOn()?' · <span style="color:#b02a2a">database not updated</span>':''))):('could not import — '+X(s.err))); }).join('<br>')+
+    (left.length?('<br><span style="color:#9a6410">Left out — no project has this name in Setup ▸ Project Information: '+X(left.slice(0,8).join(' · '))+(left.length>8?' …':'')+'</span>'):'');
+  try{ window.toast('✅ '+lab+': '+tot+' new line'+(tot===1?'':'s')+' across '+summary.filter(function(s){ return s.ok&&s.d>0; }).length+' project(s).'); }catch(e){}
+  try{ var ov=E('mrSetOv'); if(ov&&typeof renderMasterSettings==='function')renderMasterSettings(); }catch(e){}
+}
+function wire(ov){
+  var f=ov.querySelector('#merpFile'); if(!f||f.__wired)return; f.__wired=1; var pending='';
+  ov.querySelectorAll('[data-merp]').forEach(function(b){ b.onclick=async function(){
+    if(BUSY){ toast('An import is still running — one moment.'); return; }
+    if(typeof mrPassOk==='function'&&!(await mrPassOk()))return;
+    pending=b.dataset.merp; f.value=''; f.click(); }; });
+  f.addEventListener('change',function(e){ var file=e.target.files[0]; e.target.value=''; var k=pending; pending=''; if(file&&k)run(k,file); });
+}
+window.mrErpHTML=html; window.mrErpWire=wire;
 })();
 
 </script>
